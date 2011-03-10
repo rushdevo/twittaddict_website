@@ -70,3 +70,8 @@ a {
 	text-align:center;
 	color:#666666 !important;
 }
+.badge {
+	width:226px;
+	text-align:center;
+	margin-top: 5px;
+}
