@@ -8,10 +8,7 @@ module ActiveResource
     end
 
     def to_s
-      message = "Failed."
-      message << "  Response code = #{response.code}." if response.respond_to?(:code)
-      message << "  Response message = #{response.message}." if response.respond_to?(:message)
-      message
+      "Failed with #{response.code} #{response.message if response.respond_to?(:message)}"
     end
   end
 
@@ -33,45 +30,32 @@ module ActiveResource
 
   # 3xx Redirection
   class Redirection < ConnectionError # :nodoc:
-    def to_s
-      response['Location'] ? "#{super} => #{response['Location']}" : super
-    end
-  end
-
-  class MissingPrefixParam < ArgumentError # :nodoc:
+    def to_s; response['Location'] ? "#{super} => #{response['Location']}" : super; end
   end
 
   # 4xx Client Error
-  class ClientError < ConnectionError # :nodoc:
-  end
+  class ClientError < ConnectionError; end # :nodoc:
 
   # 400 Bad Request
-  class BadRequest < ClientError # :nodoc:
-  end
+  class BadRequest < ClientError; end # :nodoc
 
   # 401 Unauthorized
-  class UnauthorizedAccess < ClientError # :nodoc:
-  end
+  class UnauthorizedAccess < ClientError; end # :nodoc
 
   # 403 Forbidden
-  class ForbiddenAccess < ClientError # :nodoc:
-  end
+  class ForbiddenAccess < ClientError; end # :nodoc
 
   # 404 Not Found
-  class ResourceNotFound < ClientError # :nodoc:
-  end
+  class ResourceNotFound < ClientError; end # :nodoc:
 
   # 409 Conflict
-  class ResourceConflict < ClientError # :nodoc:
-  end
+  class ResourceConflict < ClientError; end # :nodoc:
 
   # 410 Gone
-  class ResourceGone < ClientError # :nodoc:
-  end
+  class ResourceGone < ClientError; end # :nodoc:
 
   # 5xx Server Error
-  class ServerError < ConnectionError # :nodoc:
-  end
+  class ServerError < ConnectionError; end # :nodoc:
 
   # 405 Method Not Allowed
   class MethodNotAllowed < ClientError # :nodoc:

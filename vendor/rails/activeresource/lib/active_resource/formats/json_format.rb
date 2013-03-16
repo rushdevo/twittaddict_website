@@ -1,5 +1,3 @@
-require 'active_support/json'
-
 module ActiveResource
   module Formats
     module JsonFormat
@@ -18,7 +16,7 @@ module ActiveResource
       end
 
       def decode(json)
-        Formats.remove_root(ActiveSupport::JSON.decode(json))
+        ActiveSupport::JSON.decode(json)
       end
     end
   end

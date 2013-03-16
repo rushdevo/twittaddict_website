@@ -1,51 +1,38 @@
-begin
-  require 'nokogiri'
-rescue LoadError => e
-  $stderr.puts "You don't have nokogiri installed in your application. Please add it to your Gemfile and run bundle install"
-  raise e
-end
-require 'active_support/core_ext/object/blank'
-require 'stringio'
+require 'nokogiri'
 
 # = XmlMini Nokogiri implementation
 module ActiveSupport
   module XmlMini_Nokogiri #:nodoc:
     extend self
 
-    # Parse an XML Document string or IO into a simple hash using libxml / nokogiri.
-    # data::
-    #   XML Document string or IO to parse
-    def parse(data)
-      if !data.respond_to?(:read)
-        data = StringIO.new(data || '')
-      end
-
-      char = data.getc
-      if char.nil?
+    # Parse an XML Document string into a simple hash using libxml / nokogiri.
+    # string::
+    #   XML Document string to parse
+    def parse(string)
+      if string.blank?
         {}
       else
-        data.ungetc(char)
-        doc = Nokogiri::XML(data)
+        doc = Nokogiri::XML(string)
         raise doc.errors.first if doc.errors.length > 0
         doc.to_hash
       end
     end
 
-    module Conversions #:nodoc:
-      module Document #:nodoc:
+    module Conversions
+      module Document
         def to_hash
           root.to_hash
         end
       end
 
-      module Node #:nodoc:
+      module Node
         CONTENT_ROOT = '__content__'.freeze
 
         # Convert XML document to hash
         #
         # hash::
         #   Hash to merge the converted element into.
-        def to_hash(hash={})
+        def to_hash(hash = {})
           node_hash = {}
 
           # Insert node hash into parent hash correctly.
@@ -53,6 +40,7 @@ module ActiveSupport
             when Array then hash[name] << node_hash
             when Hash  then hash[name] = [hash[name], node_hash]
             when nil   then hash[name] = node_hash
+            else raise "Unexpected error during hash insertion!"
           end
 
           # Handle child elements
@@ -62,7 +50,7 @@ module ActiveSupport
             elsif c.text? || c.cdata?
               node_hash[CONTENT_ROOT] ||= ''
               node_hash[CONTENT_ROOT] << c.content
-            end
+             end
           end
 
           # Remove content node if it is blank and there are child tags

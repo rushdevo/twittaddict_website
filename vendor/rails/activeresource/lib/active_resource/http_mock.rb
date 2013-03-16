@@ -1,5 +1,4 @@
-require 'active_support/core_ext/kernel/reporting'
-require 'active_support/core_ext/object/inclusion'
+require 'active_resource/connection'
 
 module ActiveResource
   class InvalidRequestError < StandardError; end #:nodoc:
@@ -9,8 +8,8 @@ module ActiveResource
   # requests.
   #
   # To test your Active Resource model, you simply call the ActiveResource::HttpMock.respond_to
-  # method with an attached block. The block declares a set of URIs with expected input, and the output
-  # each request should return. The passed in block has any number of entries in the following generalized
+  # method with an attached block.  The block declares a set of URIs with expected input, and the output
+  # each request should return.  The passed in block has any number of entries in the following generalized
   # format:
   #
   #   mock.http_method(path, request_headers = {}, body = nil, status = 200, response_headers = {})
@@ -20,30 +19,30 @@ module ActiveResource
   # * <tt>path</tt> - A string, starting with a "/", defining the URI that is expected to be
   #   called.
   # * <tt>request_headers</tt> - Headers that are expected along with the request.  This argument uses a
-  #   hash format, such as <tt>{ "Content-Type" => "application/json" }</tt>.  This mock will only trigger
+  #   hash format, such as <tt>{ "Content-Type" => "application/xml" }</tt>.  This mock will only trigger
   #   if your tests sends a request with identical headers.
   # * <tt>body</tt> - The data to be returned.  This should be a string of Active Resource parseable content,
-  #   such as Json.
+  #   such as XML.
   # * <tt>status</tt> - The HTTP response code, as an integer, to return with the response.
   # * <tt>response_headers</tt> - Headers to be returned with the response.  Uses the same hash format as
   #   <tt>request_headers</tt> listed above.
   #
   # In order for a mock to deliver its content, the incoming request must match by the <tt>http_method</tt>,
-  # +path+ and <tt>request_headers</tt>. If no match is found an +InvalidRequestError+ exception
+  # +path+ and <tt>request_headers</tt>.  If no match is found an InvalidRequestError exception
   # will be raised showing you what request it could not find a response for and also what requests and response
   # pairs have been recorded so you can create a new mock for that request.
   #
   # ==== Example
   #   def setup
-  #     @matz  = { :person => { :id => 1, :name => "Matz" } }.to_json
+  #     @matz  = { :id => 1, :name => "Matz" }.to_xml(:root => "person")
   #     ActiveResource::HttpMock.respond_to do |mock|
-  #       mock.post   "/people.json",   {}, @matz, 201, "Location" => "/people/1.json"
-  #       mock.get    "/people/1.json", {}, @matz
-  #       mock.put    "/people/1.json", {}, nil, 204
-  #       mock.delete "/people/1.json", {}, nil, 200
+  #       mock.post   "/people.xml",   {}, @matz, 201, "Location" => "/people/1.xml"
+  #       mock.get    "/people/1.xml", {}, @matz
+  #       mock.put    "/people/1.xml", {}, nil, 204
+  #       mock.delete "/people/1.xml", {}, nil, 200
   #     end
   #   end
-  #
+  #   
   #   def test_get_matz
   #     person = Person.find(1)
   #     assert_equal "Matz", person.name
@@ -55,48 +54,37 @@ module ActiveResource
         @responses = responses
       end
 
-      [ :post, :put, :get, :delete, :head ].each do |method|
+      for method in [ :post, :put, :get, :delete, :head ]
         # def post(path, request_headers = {}, body = nil, status = 200, response_headers = {})
         #   @responses[Request.new(:post, path, nil, request_headers)] = Response.new(body || "", status, response_headers)
         # end
         module_eval <<-EOE, __FILE__, __LINE__ + 1
           def #{method}(path, request_headers = {}, body = nil, status = 200, response_headers = {})
-            request  = Request.new(:#{method}, path, nil, request_headers)
-            response = Response.new(body || "", status, response_headers)
-
-            delete_duplicate_responses(request)
-
-            @responses << [request, response]
+            @responses << [Request.new(:#{method}, path, nil, request_headers), Response.new(body || "", status, response_headers)]
           end
         EOE
-      end
-
-    private
-
-      def delete_duplicate_responses(request)
-        @responses.delete_if {|r| r[0] == request }
       end
     end
 
     class << self
 
-      # Returns an array of all request objects that have been sent to the mock. You can use this to check
+      # Returns an array of all request objects that have been sent to the mock.  You can use this to check
       # if your model actually sent an HTTP request.
       #
       # ==== Example
       #   def setup
-      #     @matz  = { :person => { :id => 1, :name => "Matz" } }.to_json
+      #     @matz  = { :id => 1, :name => "Matz" }.to_xml(:root => "person")
       #     ActiveResource::HttpMock.respond_to do |mock|
-      #       mock.get "/people/1.json", {}, @matz
+      #       mock.get "/people/1.xml", {}, @matz
       #     end
       #   end
-      #
+      #   
       #   def test_should_request_remote_service
       #     person = Person.find(1)  # Call the remote service
-      #
+      #     
       #     # This request object has the same HTTP method and path as declared by the mock
-      #     expected_request = ActiveResource::Request.new(:get, "/people/1.json")
-      #
+      #     expected_request = ActiveResource::Request.new(:get, "/people/1.xml")
+      #     
       #     # Assert that the mock received, and responded to, the expected request from the model
       #     assert ActiveResource::HttpMock.requests.include?(expected_request)
       #   end
@@ -105,108 +93,90 @@ module ActiveResource
       end
 
       # Returns the list of requests and their mocked responses. Look up a
-      # response for a request using <tt>responses.assoc(request)</tt>.
+      # response for a request using responses.assoc(request).
       def responses
         @@responses ||= []
       end
 
       # Accepts a block which declares a set of requests and responses for the HttpMock to respond to in
       # the following format:
-      #
+      # 
       #   mock.http_method(path, request_headers = {}, body = nil, status = 200, response_headers = {})
-      #
+      # 
       # === Example
-      #
-      #   @matz  = { :person => { :id => 1, :name => "Matz" } }.to_json
+      # 
+      #   @matz  = { :id => 1, :name => "Matz" }.to_xml(:root => "person")
       #   ActiveResource::HttpMock.respond_to do |mock|
-      #     mock.post   "/people.json",   {}, @matz, 201, "Location" => "/people/1.json"
-      #     mock.get    "/people/1.json", {}, @matz
-      #     mock.put    "/people/1.json", {}, nil, 204
-      #     mock.delete "/people/1.json", {}, nil, 200
+      #     mock.post   "/people.xml",   {}, @matz, 201, "Location" => "/people/1.xml"
+      #     mock.get    "/people/1.xml", {}, @matz
+      #     mock.put    "/people/1.xml", {}, nil, 204
+      #     mock.delete "/people/1.xml", {}, nil, 200
       #   end
-      #
+      # 
       # Alternatively, accepts a hash of <tt>{Request => Response}</tt> pairs allowing you to generate
       # these the following format:
-      #
+      # 
       #   ActiveResource::Request.new(method, path, body, request_headers)
       #   ActiveResource::Response.new(body, status, response_headers)
-      #
+      # 
       # === Example
-      #
+      # 
       # Request.new(:#{method}, path, nil, request_headers)
+      # 
+      #   @matz  = { :id => 1, :name => "Matz" }.to_xml(:root => "person")
       #
-      #   @matz  = { :person => { :id => 1, :name => "Matz" } }.to_json
-      #
-      #   create_matz      = ActiveResource::Request.new(:post, '/people.json', @matz, {})
-      #   created_response = ActiveResource::Response.new("", 201, {"Location" => "/people/1.json"})
-      #   get_matz         = ActiveResource::Request.new(:get, '/people/1.json', nil)
+      #   create_matz      = ActiveResource::Request.new(:post, '/people.xml', @matz, {})
+      #   created_response = ActiveResource::Response.new("", 201, {"Location" => "/people/1.xml"})
+      #   get_matz         = ActiveResource::Request.new(:get, '/people/1.xml', nil)
       #   ok_response      = ActiveResource::Response.new("", 200, {})
-      #
+      # 
       #   pairs = {create_matz => created_response, get_matz => ok_response}
-      #
+      # 
       #   ActiveResource::HttpMock.respond_to(pairs)
       #
       # Note, by default, every time you call +respond_to+, any previous request and response pairs stored
       # in HttpMock will be deleted giving you a clean slate to work on.
-      #
-      # If you want to override this behavior, pass in +false+ as the last argument to +respond_to+
-      #
+      # 
+      # If you want to override this behaviour, pass in +false+ as the last argument to +respond_to+
+      # 
       # === Example
-      #
+      # 
       #   ActiveResource::HttpMock.respond_to do |mock|
-      #     mock.send(:get, "/people/1", {}, "JSON1")
+      #     mock.send(:get, "/people/1", {}, "XML1")
       #   end
       #   ActiveResource::HttpMock.responses.length #=> 1
-      #
+      #   
       #   ActiveResource::HttpMock.respond_to(false) do |mock|
-      #     mock.send(:get, "/people/2", {}, "JSON2")
+      #     mock.send(:get, "/people/2", {}, "XML2")
       #   end
       #   ActiveResource::HttpMock.responses.length #=> 2
-      #
+      # 
       # This also works with passing in generated pairs of requests and responses, again, just pass in false
       # as the last argument:
-      #
+      # 
       # === Example
-      #
+      # 
       #   ActiveResource::HttpMock.respond_to do |mock|
-      #     mock.send(:get, "/people/1", {}, "JSON1")
+      #     mock.send(:get, "/people/1", {}, "XML1")
       #   end
       #   ActiveResource::HttpMock.responses.length #=> 1
-      #
-      #   get_matz         = ActiveResource::Request.new(:get, '/people/1.json', nil)
+      # 
+      #   get_matz         = ActiveResource::Request.new(:get, '/people/1.xml', nil)
       #   ok_response      = ActiveResource::Response.new("", 200, {})
-      #
+      # 
       #   pairs = {get_matz => ok_response}
       #
       #   ActiveResource::HttpMock.respond_to(pairs, false)
       #   ActiveResource::HttpMock.responses.length #=> 2
-      #
-      #   # If you add a response with an existing request, it will be replaced
-      #
-      #   fail_response      = ActiveResource::Response.new("", 404, {})
-      #   pairs = {get_matz => fail_response}
-      #
-      #   ActiveResource::HttpMock.respond_to(pairs, false)
-      #   ActiveResource::HttpMock.responses.length #=> 2
-      #
       def respond_to(*args) #:yields: mock
         pairs = args.first || {}
         reset! if args.last.class != FalseClass
-
+        responses.concat pairs.to_a
         if block_given?
           yield Responder.new(responses)
         else
-          delete_responses_to_replace pairs.to_a
-          responses.concat pairs.to_a
           Responder.new(responses)
         end
-      end
-
-      def delete_responses_to_replace(new_responses)
-        new_responses.each{|nr|
-          request_to_remove = nr[0]
-          @@responses = responses.delete_if{|r| r[0] == request_to_remove}
-        }
       end
 
       # Deletes all logged requests and responses.
@@ -278,6 +248,7 @@ module ActiveResource
         headers.dup.merge(format_header => req.headers[format_header]) == req.headers
       end
     end
+
   end
 
   class Response
@@ -299,10 +270,8 @@ module ActiveResource
       end
     end
 
-    # Returns true if code is 2xx,
-    # false otherwise.
     def success?
-      code.in?(200..299)
+      (200..299).include?(code)
     end
 
     def [](key)
@@ -313,8 +282,6 @@ module ActiveResource
       headers[key] = value
     end
 
-    # Returns true if the other is a Response with an equal body, equal message
-    # and equal headers. Otherwise it returns false.
     def ==(other)
       if (other.is_a?(Response))
         other.body == body && other.message == message && other.headers == headers

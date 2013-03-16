@@ -1,8 +1,4 @@
-require 'active_support/core_ext/object/blank'
-
 module ActiveRecord
-  # = Active Record Schema
-  #
   # Allows programmers to programmatically define a schema in a portable
   # DSL. This means you can define tables, indexes, etc. without using SQL
   # directly, so your applications can more easily support multiple
@@ -30,8 +26,10 @@ module ActiveRecord
   # ActiveRecord::Schema is only supported by database adapters that also
   # support migrations, the two features being very similar.
   class Schema < Migration
-    def migrations_paths
-      ActiveRecord::Migrator.migrations_paths
+    private_class_method :new
+
+    def self.migrations_path
+      ActiveRecord::Migrator.migrations_path
     end
 
     # Eval the given block. All methods available to the current connection
@@ -46,12 +44,11 @@ module ActiveRecord
     #     ...
     #   end
     def self.define(info={}, &block)
-      schema = new
-      schema.instance_eval(&block)
+      instance_eval(&block)
 
       unless info[:version].blank?
         initialize_schema_migrations_table
-        assume_migrated_upto_version(info[:version], schema.migrations_paths)
+        assume_migrated_upto_version(info[:version], migrations_path)
       end
     end
   end

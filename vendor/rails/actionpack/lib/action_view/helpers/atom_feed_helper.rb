@@ -1,18 +1,16 @@
 require 'set'
 
+# Adds easy defaults to writing Atom feeds with the Builder template engine (this does not work on ERb or any other
+# template languages).
 module ActionView
-  # = Action View Atom Feed Helpers
   module Helpers #:nodoc:
     module AtomFeedHelper
-      # Adds easy defaults to writing Atom feeds with the Builder template engine (this does not work on ERB or any other
-      # template languages).
-      #
       # Full usage example:
       #
       #   config/routes.rb:
-      #     Basecamp::Application.routes.draw do
-      #       resources :posts
-      #       root :to => "posts#index"
+      #     ActionController::Routing::Routes.draw do |map|
+      #       map.resources :posts
+      #       map.root :controller => "posts"
       #     end
       #
       #   app/controllers/posts_controller.rb:
@@ -20,7 +18,7 @@ module ActionView
       #       # GET /posts.html
       #       # GET /posts.atom
       #       def index
-      #         @posts = Post.all
+      #         @posts = Post.find(:all)
       #
       #         respond_to do |format|
       #           format.html
@@ -32,9 +30,9 @@ module ActionView
       #   app/views/posts/index.atom.builder:
       #     atom_feed do |feed|
       #       feed.title("My great blog!")
-      #       feed.updated(@posts[0].created_at) if @posts.length > 0
+      #       feed.updated(@posts.first.created_at)
       #
-      #       @posts.each do |post|
+      #       for post in @posts
       #         feed.entry(post) do |entry|
       #           entry.title(post.title)
       #           entry.content(post.body, :type => 'html')
@@ -51,7 +49,7 @@ module ActionView
       # * <tt>:language</tt>: Defaults to "en-US".
       # * <tt>:root_url</tt>: The HTML alternative that this feed is doubling for. Defaults to / on the current host.
       # * <tt>:url</tt>: The URL for this feed. Defaults to the current URL.
-      # * <tt>:id</tt>: The id for this feed. Defaults to "tag:#{request.host},#{options[:schema_date]}:#{request.fullpath.split(".")[0]}"
+      # * <tt>:id</tt>: The id for this feed. Defaults to "tag:#{request.host},#{options[:schema_date]}:#{request.request_uri.split(".")[0]}"
       # * <tt>:schema_date</tt>: The date at which the tag scheme for the feed was first used. A good default is the year you
       #   created the feed. See http://feedvalidator.org/docs/error/InvalidTAG.html for more information. If not specified,
       #   2005 is used (as an "I don't care" value).
@@ -66,7 +64,7 @@ module ActionView
       #       feed.updated((@posts.first.created_at))
       #       feed.tag!(openSearch:totalResults, 10)
       #
-      #       @posts.each do |post|
+      #       for post in @posts
       #         feed.entry(post) do |entry|
       #           entry.title(post.title)
       #           entry.content(post.body, :type => 'html')
@@ -81,8 +79,8 @@ module ActionView
       #
       # The Atom spec defines five elements (content rights title subtitle
       # summary) which may directly contain xhtml content if :type => 'xhtml'
-      # is specified as an attribute. If so, this helper will take care of
-      # the enclosing div and xhtml namespace declaration. Example usage:
+      # is specified as an attribute.  If so, this helper will take care of
+      # the enclosing div and xhtml namespace declaration.  Example usage:
       #
       #    entry.summary :type => 'xhtml' do |xhtml|
       #      xhtml.p pluralize(order.line_items.count, "line item")
@@ -91,8 +89,8 @@ module ActionView
       #    end
       #
       #
-      # <tt>atom_feed</tt> yields an +AtomFeedBuilder+ instance. Nested elements yield
-      # an +AtomBuilder+ instance.
+      # atom_feed yields an AtomFeedBuilder instance.  Nested elements yield
+      # an AtomBuilder instance.
       def atom_feed(options = {}, &block)
         if options[:schema_date]
           options[:schema_date] = options[:schema_date].strftime("%Y-%m-%d") if options[:schema_date].respond_to?(:strftime)
@@ -116,7 +114,7 @@ module ActionView
         feed_opts.merge!(options).reject!{|k,v| !k.to_s.match(/^xml/)}
 
         xml.feed(feed_opts) do
-          xml.id(options[:id] || "tag:#{request.host},#{options[:schema_date]}:#{request.fullpath.split(".")[0]}")
+          xml.id(options[:id] || "tag:#{request.host},#{options[:schema_date]}:#{request.request_uri.split(".")[0]}")
           xml.link(:rel => 'alternate', :type => 'text/html', :href => options[:root_url] || (request.protocol + request.host_with_port))
           xml.link(:rel => 'self', :type => 'application/atom+xml', :href => options[:url] || request.url)
 

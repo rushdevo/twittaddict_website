@@ -1,19 +1,14 @@
 class Module
   # Provides a delegate class method to easily expose contained objects' methods
   # as your own. Pass one or more methods (specified as symbols or strings)
-  # and the name of the target object via the <tt>:to</tt> option (also a symbol
-  # or string). At least one method and the <tt>:to</tt> option are required.
+  # and the name of the target object as the final <tt>:to</tt> option (also a symbol
+  # or string).  At least one method and the <tt>:to</tt> option are required.
   #
   # Delegation is particularly useful with Active Record associations:
   #
   #   class Greeter < ActiveRecord::Base
-  #     def hello
-  #       "hello"
-  #     end
-  #
-  #     def goodbye
-  #       "goodbye"
-  #     end
+  #     def hello()   "hello"   end
+  #     def goodbye() "goodbye" end
   #   end
   #
   #   class Foo < ActiveRecord::Base
@@ -39,7 +34,7 @@ class Module
   #   class Foo
   #     CONSTANT_ARRAY = [0,1,2,3]
   #     @@class_array  = [4,5,6,7]
-  #
+  #     
   #     def initialize
   #       @instance_array = [8,9,10,11]
   #     end
@@ -77,9 +72,9 @@ class Module
   #   invoice.customer_name    # => "John Doe"
   #   invoice.customer_address # => "Vimmersvej 13"
   #
-  # If the delegate object is +nil+ an exception is raised, and that happens
-  # no matter whether +nil+ responds to the delegated method. You can get a
-  # +nil+ instead with the +:allow_nil+ option.
+  # If the object to which you delegate can be nil, you may want to use the
+  # :allow_nil option. In that case, it returns nil instead of raising a
+  # NoMethodError exception:
   #
   #  class Foo
   #    attr_accessor :bar
@@ -106,48 +101,35 @@ class Module
     unless options.is_a?(Hash) && to = options[:to]
       raise ArgumentError, "Delegation needs a target. Supply an options hash with a :to key as the last argument (e.g. delegate :hello, :to => :greeter)."
     end
-    prefix, to, allow_nil = options[:prefix], options[:to], options[:allow_nil]
 
-    if prefix == true && to.to_s =~ /^[^a-z_]/
+    if options[:prefix] == true && options[:to].to_s =~ /^[^a-z_]/
       raise ArgumentError, "Can only automatically set the delegation prefix when delegating to a method."
     end
 
-    method_prefix =
-      if prefix
-        "#{prefix == true ? to : prefix}_"
-      else
-        ''
-      end
+    prefix = options[:prefix] && "#{options[:prefix] == true ? to : options[:prefix]}_"
 
     file, line = caller.first.split(':', 2)
     line = line.to_i
 
     methods.each do |method|
-      method = method.to_s
+      on_nil =
+        if options[:allow_nil]
+          'return'
+        else
+          %(raise "#{prefix}#{method} delegated to #{to}.#{method}, but #{to} is nil: \#{self.inspect}")
+        end
 
-      if allow_nil
-        module_eval(<<-EOS, file, line - 2)
-          def #{method_prefix}#{method}(*args, &block)        # def customer_name(*args, &block)
-            if #{to} || #{to}.respond_to?(:#{method})         #   if client || client.respond_to?(:name)
-              #{to}.__send__(:#{method}, *args, &block)       #     client.__send__(:name, *args, &block)
-            end                                               #   end
-          end                                                 # end
-        EOS
-      else
-        exception = %(raise "#{self}##{method_prefix}#{method} delegated to #{to}.#{method}, but #{to} is nil: \#{self.inspect}")
-
-        module_eval(<<-EOS, file, line - 1)
-          def #{method_prefix}#{method}(*args, &block)        # def customer_name(*args, &block)
-            #{to}.__send__(:#{method}, *args, &block)         #   client.__send__(:name, *args, &block)
-          rescue NoMethodError                                # rescue NoMethodError
-            if #{to}.nil?                                     #   if client.nil?
-              #{exception}                                    #     # add helpful message to the exception
-            else                                              #   else
-              raise                                           #     raise
-            end                                               #   end
-          end                                                 # end
-        EOS
-      end
+      module_eval(<<-EOS, file, line)
+        def #{prefix}#{method}(*args, &block)               # def customer_name(*args, &block)
+          #{to}.__send__(#{method.inspect}, *args, &block)  #   client.__send__(:name, *args, &block)
+        rescue NoMethodError                                # rescue NoMethodError
+          if #{to}.nil?                                     #   if client.nil?
+            #{on_nil}
+          else                                              #   else
+            raise                                           #     raise
+          end                                               #   end
+        end                                                 # end
+      EOS
     end
   end
 end

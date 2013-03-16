@@ -1,20 +1,18 @@
 require 'stringio'
-require 'active_support/core_ext/big_decimal'
+require 'bigdecimal'
 
 module ActiveRecord
-  # = Active Record Schema Dumper
-  #
   # This class is used to dump the database schema for some connection to some
   # output format (i.e., ActiveRecord::Schema).
   class SchemaDumper #:nodoc:
     private_class_method :new
-
+    
     ##
     # :singleton-method:
-    # A list of tables which should not be dumped to the schema.
+    # A list of tables which should not be dumped to the schema. 
     # Acceptable values are strings as well as regexp.
     # This setting is only used if ActiveRecord::Base.schema_format == :ruby
-    cattr_accessor :ignore_tables
+    cattr_accessor :ignore_tables 
     @@ignore_tables = []
 
     def self.dump(connection=ActiveRecord::Base.connection, stream=STDOUT)
@@ -40,19 +38,14 @@ module ActiveRecord
       def header(stream)
         define_params = @version ? ":version => #{@version}" : ""
 
-        if stream.respond_to?(:external_encoding) && stream.external_encoding
-          stream.puts "# encoding: #{stream.external_encoding.name}"
-        end
-
         stream.puts <<HEADER
-# This file is auto-generated from the current state of the database. Instead
-# of editing this file, please use the migrations feature of Active Record to
-# incrementally modify your database, and then regenerate this schema definition.
+# This file is auto-generated from the current state of the database. Instead of editing this file, 
+# please use the migrations feature of Active Record to incrementally modify your database, and
+# then regenerate this schema definition.
 #
-# Note that this schema.rb definition is the authoritative source for your
-# database schema. If you need to create the application database on another
-# system, you should be using db:schema:load, not running all the migrations
-# from scratch. The latter is a flawed and unsustainable approach (the more migrations
+# Note that this schema.rb definition is the authoritative source for your database schema. If you need
+# to create the application database on another system, you should be using db:schema:load, not running
+# all the migrations from scratch. The latter is a flawed and unsustainable approach (the more migrations
 # you'll amass, the slower it'll run and the greater likelihood for issues).
 #
 # It's strongly recommended to check this file into your version control system.
@@ -75,7 +68,7 @@ HEADER
             else
               raise StandardError, 'ActiveRecord::SchemaDumper.ignore_tables accepts an array of String and / or Regexp values.'
             end
-          end
+          end 
           table(tbl, stream)
         end
       end
@@ -87,11 +80,11 @@ HEADER
 
           # first dump primary key column
           if @connection.respond_to?(:pk_and_sequence_for)
-            pk, _ = @connection.pk_and_sequence_for(table)
+            pk, pk_seq = @connection.pk_and_sequence_for(table)
           elsif @connection.respond_to?(:primary_key)
             pk = @connection.primary_key(table)
           end
-
+          
           tbl.print "  create_table #{table.inspect}"
           if columns.detect { |c| c.name == pk }
             if pk != 'id'
@@ -109,25 +102,18 @@ HEADER
             next if column.name == pk
             spec = {}
             spec[:name]      = column.name.inspect
-
-            # AR has an optimization which handles zero-scale decimals as integers. This
-            # code ensures that the dumper still dumps the column as a decimal.
-            spec[:type]      = if column.type == :integer && [/^numeric/, /^decimal/].any? { |e| e.match(column.sql_type) }
-                                 'decimal'
-                               else
-                                 column.type.to_s
-                               end
-            spec[:limit]     = column.limit.inspect if column.limit != @types[column.type][:limit] && spec[:type] != 'decimal'
-            spec[:precision] = column.precision.inspect if column.precision
-            spec[:scale]     = column.scale.inspect if column.scale
-            spec[:null]      = 'false' unless column.null
+            spec[:type]      = column.type.to_s
+            spec[:limit]     = column.limit.inspect if column.limit != @types[column.type][:limit] && column.type != :decimal
+            spec[:precision] = column.precision.inspect if !column.precision.nil?
+            spec[:scale]     = column.scale.inspect if !column.scale.nil?
+            spec[:null]      = 'false' if !column.null
             spec[:default]   = default_string(column.default) if column.has_default?
             (spec.keys - [:name, :type]).each{ |k| spec[k].insert(0, "#{k.inspect} => ")}
             spec
           end.compact
 
           # find all migration keys used in this table
-          keys = [:name, :limit, :precision, :scale, :default, :null] & column_specs.map{ |k| k.keys }.flatten
+          keys = [:name, :limit, :precision, :scale, :default, :null] & column_specs.map(&:keys).flatten
 
           # figure out the lengths for each column based on above keys
           lengths = keys.map{ |key| column_specs.map{ |spec| spec[key] ? spec[key].length + 2 : 0 }.max }
@@ -152,7 +138,7 @@ HEADER
 
           tbl.puts "  end"
           tbl.puts
-
+          
           indexes(table, tbl)
 
           tbl.rewind
@@ -162,7 +148,7 @@ HEADER
           stream.puts "#   #{e.message}"
           stream.puts
         end
-
+        
         stream
       end
 
@@ -176,24 +162,19 @@ HEADER
           value.inspect
         end
       end
-
+      
       def indexes(table, stream)
         if (indexes = @connection.indexes(table)).any?
           add_index_statements = indexes.map do |index|
-            statement_parts = [
-              ('add_index ' + index.table.inspect),
-              index.columns.inspect,
-              (':name => ' + index.name.inspect),
-            ]
-            statement_parts << ':unique => true' if index.unique
+            statment_parts = [ ('add_index ' + index.table.inspect) ]
+            statment_parts << index.columns.inspect
+            statment_parts << (':name => ' + index.name.inspect)
+            statment_parts << ':unique => true' if index.unique
 
-            index_lengths = (index.lengths || []).compact
-            statement_parts << (':length => ' + Hash[index.columns.zip(index.lengths)].inspect) unless index_lengths.empty?
+            index_lengths = index.lengths.compact if index.lengths.is_a?(Array)
+            statment_parts << (':length => ' + Hash[*index.columns.zip(index.lengths).flatten].inspect) if index_lengths.present?
 
-            index_orders = (index.orders || {})
-            statement_parts << (':order => ' + index.orders.inspect) unless index_orders.empty?
-
-            '  ' + statement_parts.join(', ')
+            '  ' + statment_parts.join(', ')
           end
 
           stream.puts add_index_statements.sort.join("\n")

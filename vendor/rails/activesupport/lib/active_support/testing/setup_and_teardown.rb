@@ -1,29 +1,18 @@
-require 'active_support/concern'
 require 'active_support/callbacks'
 
 module ActiveSupport
   module Testing
     module SetupAndTeardown
-      extend ActiveSupport::Concern
+      def self.included(base)
+        base.class_eval do
+          include ActiveSupport::Callbacks
+          define_callbacks :setup, :teardown
 
-      included do
-        include ActiveSupport::Callbacks
-        define_callbacks :setup, :teardown
-
-        if defined?(MiniTest::Assertions) && TestCase < MiniTest::Assertions
-          include ForMiniTest
-        else
-          include ForClassicTestUnit
-        end
-      end
-
-      module ClassMethods
-        def setup(*args, &block)
-          set_callback(:setup, :before, *args, &block)
-        end
-
-        def teardown(*args, &block)
-          set_callback(:teardown, :after, *args, &block)
+          if defined?(MiniTest::Assertions) && TestCase < MiniTest::Assertions
+            include ForMiniTest
+          else
+            include ForClassicTestUnit
+          end
         end
       end
 
@@ -31,16 +20,15 @@ module ActiveSupport
         def run(runner)
           result = '.'
           begin
-            run_callbacks :setup do
-              result = super
-            end
+            run_callbacks :setup
+            result = super
           rescue Exception => e
-            result = runner.puke(self.class, method_name, e)
+            result = runner.puke(self.class, __name__, e)
           ensure
             begin
-              run_callbacks :teardown
+              run_callbacks :teardown, :enumerator => :reverse_each
             rescue Exception => e
-              result = runner.puke(self.class, method_name, e)
+              result = runner.puke(self.class, __name__, e)
             end
           end
           result
@@ -56,17 +44,23 @@ module ActiveSupport
         def run(result)
           return if @method_name.to_s == "default_test"
 
-          mocha_counter = retrieve_mocha_counter(result)
+          if using_mocha = respond_to?(:mocha_verify)
+            assertion_counter_klass = if defined?(Mocha::TestCaseAdapter::AssertionCounter)
+                                        Mocha::TestCaseAdapter::AssertionCounter
+                                      else
+                                        Mocha::Integration::TestUnit::AssertionCounter
+                                      end
+            assertion_counter = assertion_counter_klass.new(result)
+          end
+
           yield(Test::Unit::TestCase::STARTED, name)
           @_result = result
-
           begin
             begin
-              run_callbacks :setup do
-                setup
-                __send__(@method_name)
-                mocha_verify(mocha_counter) if mocha_counter
-              end
+              run_callbacks :setup
+              setup
+              __send__(@method_name)
+              mocha_verify(assertion_counter) if using_mocha
             rescue Mocha::ExpectationError => e
               add_failure(e.message, e.backtrace)
             rescue Test::Unit::AssertionFailedError => e
@@ -77,7 +71,7 @@ module ActiveSupport
             ensure
               begin
                 teardown
-                run_callbacks :teardown
+                run_callbacks :teardown, :enumerator => :reverse_each
               rescue Test::Unit::AssertionFailedError => e
                 add_failure(e.message, e.backtrace)
               rescue Exception => e
@@ -86,26 +80,12 @@ module ActiveSupport
               end
             end
           ensure
-            mocha_teardown if mocha_counter
+            mocha_teardown if using_mocha
           end
-
           result.add_run
           yield(Test::Unit::TestCase::FINISHED, name)
         end
-
-        protected
-
-        def retrieve_mocha_counter(result) #:nodoc:
-          if respond_to?(:mocha_verify) # using mocha
-            if defined?(Mocha::TestCaseAdapter::AssertionCounter)
-              Mocha::TestCaseAdapter::AssertionCounter.new(result)
-            else
-              Mocha::Integration::TestUnit::AssertionCounter.new(result)
-            end
-          end
-        end
       end
-
     end
   end
 end

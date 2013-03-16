@@ -1,2 +1,5 @@
 require 'active_support/core_ext/file/atomic'
-require 'active_support/core_ext/file/path'
+
+class File #:nodoc:
+  extend ActiveSupport::CoreExtensions::File::Atomic
+end

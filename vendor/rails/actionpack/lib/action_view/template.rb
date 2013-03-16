@@ -1,325 +1,252 @@
-require 'active_support/core_ext/array/wrap'
-require 'active_support/core_ext/object/blank'
-require 'active_support/core_ext/object/try'
-require 'active_support/core_ext/kernel/singleton_class'
-
-module ActionView
-  # = Action View Template
+module ActionView #:nodoc:
   class Template
-    extend ActiveSupport::Autoload
+    class Path
+      attr_reader :path, :paths
+      delegate :hash, :inspect, :to => :path
 
-    # === Encodings in ActionView::Template
-    #
-    # ActionView::Template is one of a few sources of potential
-    # encoding issues in Rails. This is because the source for
-    # templates are usually read from disk, and Ruby (like most
-    # encoding-aware programming languages) assumes that the
-    # String retrieved through File IO is encoded in the
-    # <tt>default_external</tt> encoding. In Rails, the default
-    # <tt>default_external</tt> encoding is UTF-8.
-    #
-    # As a result, if a user saves their template as ISO-8859-1
-    # (for instance, using a non-Unicode-aware text editor),
-    # and uses characters outside of the ASCII range, their
-    # users will see diamonds with question marks in them in
-    # the browser.
-    #
-    # For the rest of this documentation, when we say "UTF-8",
-    # we mean "UTF-8 or whatever the default_internal encoding
-    # is set to". By default, it will be UTF-8.
-    #
-    # To mitigate this problem, we use a few strategies:
-    # 1. If the source is not valid UTF-8, we raise an exception
-    #    when the template is compiled to alert the user
-    #    to the problem.
-    # 2. The user can specify the encoding using Ruby-style
-    #    encoding comments in any template engine. If such
-    #    a comment is supplied, Rails will apply that encoding
-    #    to the resulting compiled source returned by the
-    #    template handler.
-    # 3. In all cases, we transcode the resulting String to
-    #    the UTF-8.
-    #
-    # This means that other parts of Rails can always assume
-    # that templates are encoded in UTF-8, even if the original
-    # source of the template was not UTF-8.
-    #
-    # From a user's perspective, the easiest thing to do is
-    # to save your templates as UTF-8. If you do this, you
-    # do not need to do anything else for things to "just work".
-    #
-    # === Instructions for template handlers
-    #
-    # The easiest thing for you to do is to simply ignore
-    # encodings. Rails will hand you the template source
-    # as the default_internal (generally UTF-8), raising
-    # an exception for the user before sending the template
-    # to you if it could not determine the original encoding.
-    #
-    # For the greatest simplicity, you can support only
-    # UTF-8 as the <tt>default_internal</tt>. This means
-    # that from the perspective of your handler, the
-    # entire pipeline is just UTF-8.
-    #
-    # === Advanced: Handlers with alternate metadata sources
-    #
-    # If you want to provide an alternate mechanism for
-    # specifying encodings (like ERB does via <%# encoding: ... %>),
-    # you may indicate that you will handle encodings yourself
-    # by implementing <tt>self.handles_encoding?</tt>
-    # on your handler.
-    #
-    # If you do, Rails will not try to encode the String
-    # into the default_internal, passing you the unaltered
-    # bytes tagged with the assumed encoding (from
-    # default_external).
-    #
-    # In this case, make sure you return a String from
-    # your handler encoded in the default_internal. Since
-    # you are handling out-of-band metadata, you are
-    # also responsible for alerting the user to any
-    # problems with converting the user's data to
-    # the <tt>default_internal</tt>.
-    #
-    # To do so, simply raise the raise +WrongEncodingError+
-    # as follows:
-    #
-    #     raise WrongEncodingError.new(
-    #       problematic_string,
-    #       expected_encoding
-    #     )
+      def initialize(path)
+        raise ArgumentError, "path already is a Path class" if path.is_a?(Path)
+        @path = (path.ends_with?(File::SEPARATOR) ? path.to(-2) : path).freeze
+      end
 
-    eager_autoload do
-      autoload :Error
-      autoload :Handlers
-      autoload :Text
-    end
-
-    extend Template::Handlers
-
-    attr_accessor :locals, :formats, :virtual_path
-
-    attr_reader :source, :identifier, :handler, :original_encoding, :updated_at
-
-    # This finalizer is needed (and exactly with a proc inside another proc)
-    # otherwise templates leak in development.
-    Finalizer = proc do |method_name, mod|
-      proc do
-        mod.module_eval do
-          remove_possible_method method_name
+      def to_s
+        if defined?(RAILS_ROOT)
+          path.to_s.sub(/^#{Regexp.escape(File.expand_path(RAILS_ROOT))}\//, '')
+        else
+          path.to_s
         end
       end
-    end
 
-    def initialize(source, identifier, handler, details)
-      format = details[:format] || (handler.default_format if handler.respond_to?(:default_format))
-
-      @source            = source
-      @identifier        = identifier
-      @handler           = handler
-      @compiled          = false
-      @original_encoding = nil
-      @locals            = details[:locals] || []
-      @virtual_path      = details[:virtual_path]
-      @updated_at        = details[:updated_at] || Time.now
-      @formats = Array.wrap(format).map { |f| f.is_a?(Mime::Type) ? f.ref : f }
-    end
-
-    # Returns if the underlying handler supports streaming. If so,
-    # a streaming buffer *may* be passed when it start rendering.
-    def supports_streaming?
-      handler.respond_to?(:supports_streaming?) && handler.supports_streaming?
-    end
-
-    # Render a template. If the template was not compiled yet, it is done
-    # exactly before rendering.
-    #
-    # This method is instrumented as "!render_template.action_view". Notice that
-    # we use a bang in this instrumentation because you don't want to
-    # consume this in production. This is only slow if it's being listened to.
-    def render(view, locals, buffer=nil, &block)
-      ActiveSupport::Notifications.instrument("!render_template.action_view", :virtual_path => @virtual_path) do
-        compile!(view)
-        view.send(method_name, locals, buffer, &block)
+      def to_str
+        path.to_str
       end
-    rescue Exception => e
-      handle_render_error(view, e)
+
+      def ==(path)
+        to_str == path.to_str
+      end
+
+      def eql?(path)
+        to_str == path.to_str
+      end
+
+      # Returns a ActionView::Template object for the given path string. The
+      # input path should be relative to the view path directory,
+      # +hello/index.html.erb+. This method also has a special exception to
+      # match partial file names without a handler extension. So
+      # +hello/index.html+ will match the first template it finds with a
+      # known template extension, +hello/index.html.erb+. Template extensions
+      # should not be confused with format extensions +html+, +js+, +xml+,
+      # etc. A format must be supplied to match a formated file. +hello/index+
+      # will never match +hello/index.html.erb+.
+      def [](path)
+      end
+
+      def load!
+      end
+
+      def self.new_and_loaded(path)
+        new(path).tap do |_path|
+          _path.load!
+        end
+      end
+
+      private
+        def relative_path_for_template_file(full_file_path)
+          full_file_path.split("#{@path}/").last
+        end
+    end
+
+    class EagerPath < Path
+      def initialize(path)
+        super
+        @loaded = false
+      end
+
+      def load!
+        return if @loaded
+
+        @paths = {}
+        templates_in_path do |template|
+          template.load!
+          template.accessible_paths.each do |path|
+            @paths[path] = template
+          end
+        end
+        @paths.freeze
+        @loaded = true
+      end
+
+      def [](path)
+        load! unless @loaded
+        @paths[path]
+      end
+
+      private
+        def templates_in_path
+          (Dir.glob("#{@path}/**/*/**") | Dir.glob("#{@path}/**")).each do |file|
+            yield create_template(file) unless File.directory?(file)
+          end
+        end
+
+        def create_template(file)
+          Template.new(relative_path_for_template_file(file), self)
+        end
+    end
+
+    extend TemplateHandlers
+    extend ActiveSupport::Memoizable
+    include Renderable
+
+    # Templates that are exempt from layouts
+    @@exempt_from_layout = Set.new([/\.rjs$/])
+
+    # Don't render layouts for templates with the given extensions.
+    def self.exempt_from_layout(*extensions)
+      regexps = extensions.collect do |extension|
+        extension.is_a?(Regexp) ? extension : /\.#{Regexp.escape(extension.to_s)}$/
+      end
+      @@exempt_from_layout.merge(regexps)
+    end
+
+    attr_accessor :template_path, :load_path, :base_path
+    attr_accessor :locale, :name, :format, :extension
+    attr_writer :filename
+    delegate :to_s, :to => :path
+
+    def initialize(template_path, load_path = nil)
+      @template_path, @load_path = template_path.dup, load_path
+      @base_path, @name, @locale, @format, @extension = split(template_path)
+      @base_path.to_s.gsub!(/\/$/, '') # Push to split method
+
+      # Extend with partial super powers
+      extend RenderablePartial if @name =~ /^_/
+    end
+
+    def accessible_paths
+      paths = []
+
+      if valid_extension?(extension)
+        paths << path
+        paths << path_without_extension
+        if multipart?
+          formats = format.split(".")
+          paths << "#{path_without_format_and_extension}.#{formats.first}"
+          paths << "#{path_without_format_and_extension}.#{formats.second}"
+        end
+      else
+        # template without explicit template handler should only be reachable through its exact path
+        paths << template_path
+      end
+
+      paths
+    end
+
+    def format_and_extension
+      (extensions = [format, extension].compact.join(".")).blank? ? nil : extensions
+    end
+    memoize :format_and_extension
+
+    def multipart?
+      format && format.include?('.')
+    end
+
+    def content_type
+      format.gsub('.', '/')
     end
 
     def mime_type
-      @mime_type ||= Mime::Type.lookup_by_extension(@formats.first.to_s) if @formats.first
+      Mime::Type.lookup_by_extension(format) if format && defined?(::Mime)
+    end
+    memoize :mime_type
+
+    def path
+      [base_path, [name, locale, format, extension].compact.join('.')].compact.join('/')
+    end
+    memoize :path
+
+    def path_without_extension
+      [base_path, [name, locale, format].compact.join('.')].compact.join('/')
+    end
+    memoize :path_without_extension
+
+    def path_without_format_and_extension
+      [base_path, [name, locale].compact.join('.')].compact.join('/')
+    end
+    memoize :path_without_format_and_extension
+
+    def relative_path
+      path = File.expand_path(filename)
+      path.sub!(/^#{Regexp.escape(File.expand_path(RAILS_ROOT))}\//, '') if defined?(RAILS_ROOT)
+      path
+    end
+    memoize :relative_path
+
+    def exempt_from_layout?
+      @@exempt_from_layout.any? { |exempted| path =~ exempted }
     end
 
-    # Receives a view object and return a template similar to self by using @virtual_path.
-    #
-    # This method is useful if you have a template object but it does not contain its source
-    # anymore since it was already compiled. In such cases, all you need to do is to call
-    # refresh passing in the view object.
-    #
-    # Notice this method raises an error if the template to be refreshed does not have a
-    # virtual path set (true just for inline templates).
-    def refresh(view)
-      raise "A template needs to have a virtual path in order to be refreshed" unless @virtual_path
-      lookup  = view.lookup_context
-      pieces  = @virtual_path.split("/")
-      name    = pieces.pop
-      partial = !!name.sub!(/^_/, "")
-      lookup.disable_cache do
-        lookup.find_template(name, [ pieces.join('/') ], partial, @locals)
-      end
+    def filename
+      # no load_path means this is an "absolute pathed" template
+      load_path ? File.join(load_path, template_path) : template_path
     end
+    memoize :filename
 
-    def inspect
-      @inspect ||= defined?(Rails.root) ? identifier.sub("#{Rails.root}/", '') : identifier
+    def source
+      File.read(filename)
     end
+    memoize :source
 
-    # This method is responsible for properly setting the encoding of the
-    # source. Until this point, we assume that the source is BINARY data.
-    # If no additional information is supplied, we assume the encoding is
-    # the same as <tt>Encoding.default_external</tt>.
-    #
-    # The user can also specify the encoding via a comment on the first
-    # line of the template (# encoding: NAME-OF-ENCODING). This will work
-    # with any template engine, as we process out the encoding comment
-    # before passing the source on to the template engine, leaving a
-    # blank line in its stead.
-    def encode!
-      return unless source.encoding_aware? && source.encoding == Encoding::BINARY
+    def method_segment
+      relative_path.to_s.gsub(/([^a-zA-Z0-9_])/) { $1.ord }
+    end
+    memoize :method_segment
 
-      # Look for # encoding: *. If we find one, we'll encode the
-      # String in that encoding, otherwise, we'll use the
-      # default external encoding.
-      if source.sub!(/\A#{ENCODING_FLAG}/, '')
-        encoding = magic_encoding = $1
+    def render_template(view, local_assigns = {})
+      render(view, local_assigns)
+    rescue Exception => e
+      raise e unless filename
+      if TemplateError === e
+        e.sub_template_of(self)
+        raise e
       else
-        encoding = Encoding.default_external
-      end
-
-      # Tag the source with the default external encoding
-      # or the encoding specified in the file
-      source.force_encoding(encoding)
-
-      # If the user didn't specify an encoding, and the handler
-      # handles encodings, we simply pass the String as is to
-      # the handler (with the default_external tag)
-      if !magic_encoding && @handler.respond_to?(:handles_encoding?) && @handler.handles_encoding?
-        source
-      # Otherwise, if the String is valid in the encoding,
-      # encode immediately to default_internal. This means
-      # that if a handler doesn't handle encodings, it will
-      # always get Strings in the default_internal
-      elsif source.valid_encoding?
-        source.encode!
-      # Otherwise, since the String is invalid in the encoding
-      # specified, raise an exception
-      else
-        raise WrongEncodingError.new(source, encoding)
+        raise TemplateError.new(self, view.assigns, e)
       end
     end
 
-    protected
+    def load!
+      freeze
+    end
 
-      # Compile a template. This method ensures a template is compiled
-      # just once and removes the source after it is compiled.
-      def compile!(view) #:nodoc:
-        return if @compiled
-
-        if view.is_a?(ActionView::CompiledTemplates)
-          mod = ActionView::CompiledTemplates
-        else
-          mod = view.singleton_class
-        end
-
-        compile(view, mod)
-
-        # Just discard the source if we have a virtual path. This
-        # means we can get the template back.
-        @source = nil if @virtual_path
-        @compiled = true
+    private
+      def valid_extension?(extension)
+        !Template.registered_template_handler(extension).nil?
       end
 
-      # Among other things, this method is responsible for properly setting
-      # the encoding of the compiled template.
-      #
-      # If the template engine handles encodings, we send the encoded
-      # String to the engine without further processing. This allows
-      # the template engine to support additional mechanisms for
-      # specifying the encoding. For instance, ERB supports <%# encoding: %>
-      #
-      # Otherwise, after we figure out the correct encoding, we then
-      # encode the source into <tt>Encoding.default_internal</tt>.
-      # In general, this means that templates will be UTF-8 inside of Rails,
-      # regardless of the original source encoding.
-      def compile(view, mod) #:nodoc:
-        encode!
-        method_name = self.method_name
-        code = @handler.call(self)
+      def valid_locale?(locale)
+        locale && I18n.available_locales.include?(locale.to_sym)
+      end
 
-        # Make sure that the resulting String to be evalled is in the
-        # encoding of the code
-        source = <<-end_src
-          def #{method_name}(local_assigns, output_buffer)
-            _old_virtual_path, @virtual_path = @virtual_path, #{@virtual_path.inspect};_old_output_buffer = @output_buffer;#{locals_code};#{code}
-          ensure
-            @virtual_path, @output_buffer = _old_virtual_path, _old_output_buffer
-          end
-        end_src
-
-        if source.encoding_aware?
-          # Make sure the source is in the encoding of the returned code
-          source.force_encoding(code.encoding)
-
-          # In case we get back a String from a handler that is not in
-          # BINARY or the default_internal, encode it to the default_internal
-          source.encode!
-
-          # Now, validate that the source we got back from the template
-          # handler is valid in the default_internal. This is for handlers
-          # that handle encoding but screw up
-          unless source.valid_encoding?
-            raise WrongEncodingError.new(@source, Encoding.default_internal)
-          end
-        end
-
-        begin
-          mod.module_eval(source, identifier, 0)
-          ObjectSpace.define_finalizer(self, Finalizer[method_name, mod])
-        rescue Exception => e # errors from template code
-          if logger = (view && view.logger)
-            logger.debug "ERROR: compiling #{method_name} RAISED #{e}"
-            logger.debug "Function body: #{source}"
-            logger.debug "Backtrace: #{e.backtrace.join("\n")}"
-          end
-
-          raise ActionView::Template::Error.new(self, {}, e)
+      # Returns file split into an array
+      #   [base_path, name, locale, format, extension]
+      def split(file)
+        if m = file.to_s.match(/^(.*\/)?([^\.]+)\.(.*)$/)
+          [m[1], m[2], *parse_extensions(m[3])]
         end
       end
 
-      def handle_render_error(view, e) #:nodoc:
-        if e.is_a?(Template::Error)
-          e.sub_template_of(self)
-          raise e
-        else
-          assigns  = view.respond_to?(:assigns) ? view.assigns : {}
-          template = self
-          unless template.source
-            template = refresh(view)
-            template.encode!
-          end
-          raise Template::Error.new(template, assigns, e)
+      # returns parsed extensions as an array
+      #   [locale, format, extension]
+      def parse_extensions(extensions)
+        exts = extensions.split(".")
+
+        if extension = valid_extension?(exts.last) && exts.pop || nil
+          locale = valid_locale?(exts.first) && exts.shift || nil
+          format = exts.join('.') if exts.any? # join('.') is needed for multipart templates
+        else # no extension, just format
+          format = exts.last
         end
-      end
 
-      def locals_code #:nodoc:
-        @locals.map { |key| "#{key} = local_assigns[:#{key}];" }.join
-      end
-
-      def method_name #:nodoc:
-        @method_name ||= "_#{identifier_method_name}__#{@identifier.hash}_#{__id__}".gsub('-', "_")
-      end
-
-      def identifier_method_name #:nodoc:
-        inspect.gsub(/[^a-z_]/, '_')
+        [locale, format, extension]
       end
   end
 end

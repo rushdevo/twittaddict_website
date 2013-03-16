@@ -1,18 +1,33 @@
-require 'active_support/core_ext/array/extract_options'
+require "active_support/core_ext/array"
 
+# Extends the module object with module and instance accessors for class attributes, 
+# just like the native attr* accessors for instance attributes.
+#
+#  module AppConfiguration
+#    mattr_accessor :google_api_key
+#    self.google_api_key = "123456789"
+#
+#    mattr_accessor :paypal_url
+#    self.paypal_url = "www.sandbox.paypal.com"
+#  end
+#
+#  AppConfiguration.google_api_key = "overriding the api key!"
 class Module
   def mattr_reader(*syms)
     options = syms.extract_options!
     syms.each do |sym|
+      next if sym.is_a?(Hash)
       class_eval(<<-EOS, __FILE__, __LINE__ + 1)
-        @@#{sym} = nil unless defined? @@#{sym}
+        unless defined? @@#{sym}
+          @@#{sym} = nil
+        end
 
         def self.#{sym}
           @@#{sym}
         end
       EOS
 
-      unless options[:instance_reader] == false || options[:instance_accessor] == false
+      unless options[:instance_reader] == false
         class_eval(<<-EOS, __FILE__, __LINE__ + 1)
           def #{sym}
             @@#{sym}
@@ -21,17 +36,21 @@ class Module
       end
     end
   end
-
+  
   def mattr_writer(*syms)
     options = syms.extract_options!
     syms.each do |sym|
       class_eval(<<-EOS, __FILE__, __LINE__ + 1)
+        unless defined? @@#{sym}
+          @@#{sym} = nil
+        end
+
         def self.#{sym}=(obj)
           @@#{sym} = obj
         end
       EOS
 
-      unless options[:instance_writer] == false || options[:instance_accessor] == false
+      unless options[:instance_writer] == false
         class_eval(<<-EOS, __FILE__, __LINE__ + 1)
           def #{sym}=(obj)
             @@#{sym} = obj
@@ -40,23 +59,7 @@ class Module
       end
     end
   end
-
-  # Extends the module object with module and instance accessors for class attributes,
-  # just like the native attr* accessors for instance attributes.
-  #
-  #  module AppConfiguration
-  #    mattr_accessor :google_api_key
-  #    self.google_api_key = "123456789"
-  #
-  #    mattr_accessor :paypal_url
-  #    self.paypal_url = "www.sandbox.paypal.com"
-  #  end
-  #
-  #  AppConfiguration.google_api_key = "overriding the api key!"
-  #
-  # To opt out of the instance writer method, pass :instance_writer => false.
-  # To opt out of the instance reader method, pass :instance_reader => false.
-  # To opt out of both instance methods, pass :instance_accessor => false.
+  
   def mattr_accessor(*syms)
     mattr_reader(*syms)
     mattr_writer(*syms)

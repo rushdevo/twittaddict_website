@@ -1,11 +1,21 @@
 # encoding: utf-8
-require 'active_support/core_ext/module/attribute_accessors'
 
 module ActiveSupport #:nodoc:
   module Multibyte
-    autoload :EncodingError, 'active_support/multibyte/exceptions'
-    autoload :Chars, 'active_support/multibyte/chars'
-    autoload :Unicode, 'active_support/multibyte/unicode'
+    # A list of all available normalization forms. See http://www.unicode.org/reports/tr15/tr15-29.html for more
+    # information about normalization.
+    NORMALIZATION_FORMS = [:c, :kc, :d, :kd]
+
+    # The Unicode version that is supported by the implementation
+    UNICODE_VERSION = '5.1.0'
+
+    # The default normalization used for operations that require normalization. It can be set to any of the
+    # normalizations in NORMALIZATION_FORMS.
+    #
+    # Example:
+    #   ActiveSupport::Multibyte.default_normalization_form = :c
+    mattr_accessor :default_normalization_form
+    self.default_normalization_form = :kc
 
     # The proxy class returned when calling mb_chars. You can use this accessor to configure your own proxy
     # class so you can support other encodings. See the ActiveSupport::Multibyte::Chars implementation for
@@ -17,7 +27,7 @@ module ActiveSupport #:nodoc:
       @proxy_class = klass
     end
 
-    # Returns the current proxy class
+    # Returns the currect proxy class
     def self.proxy_class
       @proxy_class ||= ActiveSupport::Multibyte::Chars
     end
@@ -35,10 +45,13 @@ module ActiveSupport #:nodoc:
                   \xf4        [\x80-\x8f] [\x80-\xbf] [\x80-\xbf])\z /xn,
       # Quick check for valid Shift-JIS characters, disregards the odd-even pairing
       'Shift_JIS' => /\A(?:
-                  [\x00-\x7e\xa1-\xdf]                                     |
-                  [\x81-\x9f\xe0-\xef] [\x40-\x7e\x80-\x9e\x9f-\xfc])\z /xn
+                  [\x00-\x7e \xa1-\xdf]                                     |
+                  [\x81-\x9f \xe0-\xef] [\x40-\x7e \x80-\x9e \x9f-\xfc])\z /xn
     }
   end
 end
 
+require 'active_support/multibyte/chars'
+require 'active_support/multibyte/exceptions'
+require 'active_support/multibyte/unicode_database'
 require 'active_support/multibyte/utils'

@@ -1,5 +1,5 @@
 #--
-# Copyright (c) 2005-2011 David Heinemeier Hansson
+# Copyright (c) 2005 David Heinemeier Hansson
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -21,62 +21,40 @@
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #++
 
-require 'securerandom'
-
 module ActiveSupport
-  class << self
-    attr_accessor :load_all_hooks
-    def on_load_all(&hook) load_all_hooks << hook end
-    def load_all!; load_all_hooks.each { |hook| hook.call } end
+  def self.load_all!
+    [Dependencies, Deprecation, Gzip, MessageVerifier, Multibyte, SecureRandom, TimeWithZone]
   end
-  self.load_all_hooks = []
 
-  on_load_all do
-    [Dependencies, Deprecation, Gzip, MessageVerifier, Multibyte]
-  end
+  autoload :BacktraceCleaner, 'active_support/backtrace_cleaner'
+  autoload :Base64, 'active_support/base64'
+  autoload :BasicObject, 'active_support/basic_object'
+  autoload :BufferedLogger, 'active_support/buffered_logger'
+  autoload :Cache, 'active_support/cache'
+  autoload :Callbacks, 'active_support/callbacks'
+  autoload :Deprecation, 'active_support/deprecation'
+  autoload :Duration, 'active_support/duration'
+  autoload :Gzip, 'active_support/gzip'
+  autoload :Inflector, 'active_support/inflector'
+  autoload :Memoizable, 'active_support/memoizable'
+  autoload :MessageEncryptor, 'active_support/message_encryptor'
+  autoload :MessageVerifier, 'active_support/message_verifier'
+  autoload :Multibyte, 'active_support/multibyte'
+  autoload :OptionMerger, 'active_support/option_merger'
+  autoload :OrderedHash, 'active_support/ordered_hash'
+  autoload :OrderedOptions, 'active_support/ordered_options'
+  autoload :Rescuable, 'active_support/rescuable'
+  autoload :SafeBuffer, 'active_support/core_ext/string/output_safety'
+  autoload :SecureRandom, 'active_support/secure_random'
+  autoload :StringInquirer, 'active_support/string_inquirer'
+  autoload :TimeWithZone, 'active_support/time_with_zone'
+  autoload :TimeZone, 'active_support/values/time_zone'
+  autoload :XmlMini, 'active_support/xml_mini'
 end
 
-require "active_support/dependencies/autoload"
-require "active_support/version"
+require 'active_support/vendor'
+require 'active_support/core_ext'
+require 'active_support/dependencies'
+require 'active_support/json'
 
-module ActiveSupport
-  extend ActiveSupport::Autoload
-
-  autoload :DescendantsTracker
-  autoload :FileUpdateChecker
-  autoload :LogSubscriber
-  autoload :Notifications
-
-  # TODO: Narrow this list down
-  eager_autoload do
-    autoload :BacktraceCleaner
-    autoload :Base64
-    autoload :BasicObject
-    autoload :Benchmarkable
-    autoload :BufferedLogger
-    autoload :Cache
-    autoload :Callbacks
-    autoload :Concern
-    autoload :Configurable
-    autoload :Deprecation
-    autoload :Gzip
-    autoload :Inflector
-    autoload :JSON
-    autoload :Memoizable
-    autoload :MessageEncryptor
-    autoload :MessageVerifier
-    autoload :Multibyte
-    autoload :OptionMerger
-    autoload :OrderedHash
-    autoload :OrderedOptions
-    autoload :Rescuable
-    autoload :StringInquirer
-    autoload :TaggedLogging
-    autoload :XmlMini
-  end
-
-  autoload :SafeBuffer, "active_support/core_ext/string/output_safety"
-  autoload :TestCase
-end
-
-autoload :I18n, "active_support/i18n"
+I18n.load_path << "#{File.dirname(__FILE__)}/active_support/locale/en.yml"

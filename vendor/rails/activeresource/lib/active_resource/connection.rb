@@ -1,12 +1,75 @@
-require 'active_support/core_ext/benchmark'
-require 'active_support/core_ext/uri'
-require 'active_support/core_ext/object/inclusion'
 require 'net/https'
 require 'date'
 require 'time'
 require 'uri'
+require 'benchmark'
 
 module ActiveResource
+  class ConnectionError < StandardError # :nodoc:
+    attr_reader :response
+
+    def initialize(response, message = nil)
+      @response = response
+      @message  = message
+    end
+
+    def to_s
+      "Failed with #{response.code} #{response.message if response.respond_to?(:message)}"
+    end
+  end
+
+  # Raised when a Timeout::Error occurs.
+  class TimeoutError < ConnectionError
+    def initialize(message)
+      @message = message
+    end
+    def to_s; @message ;end
+  end
+
+  # Raised when a OpenSSL::SSL::SSLError occurs.
+  class SSLError < ConnectionError
+    def initialize(message)
+      @message = message
+    end
+    def to_s; @message ;end
+  end
+
+  # 3xx Redirection
+  class Redirection < ConnectionError # :nodoc:
+    def to_s; response['Location'] ? "#{super} => #{response['Location']}" : super; end
+  end
+
+  # 4xx Client Error
+  class ClientError < ConnectionError; end # :nodoc:
+
+  # 400 Bad Request
+  class BadRequest < ClientError; end # :nodoc
+
+  # 401 Unauthorized
+  class UnauthorizedAccess < ClientError; end # :nodoc
+
+  # 403 Forbidden
+  class ForbiddenAccess < ClientError; end # :nodoc
+
+  # 404 Not Found
+  class ResourceNotFound < ClientError; end # :nodoc:
+
+  # 409 Conflict
+  class ResourceConflict < ClientError; end # :nodoc:
+
+  # 410 Gone
+  class ResourceGone < ClientError; end # :nodoc:
+
+  # 5xx Server Error
+  class ServerError < ConnectionError; end # :nodoc:
+
+  # 405 Method Not Allowed
+  class MethodNotAllowed < ClientError # :nodoc:
+    def allowed_methods
+      @response['Allow'].split(',').map { |verb| verb.strip.downcase.to_sym }
+    end
+  end
+
   # Class to handle connections to remote web services.
   # This class is used by ActiveResource::Base to interface with REST
   # services.
@@ -19,7 +82,7 @@ module ActiveResource
       :head => 'Accept'
     }
 
-    attr_reader :site, :user, :password, :auth_type, :timeout, :proxy, :ssl_options
+    attr_reader :site, :user, :password, :timeout, :proxy, :ssl_options
     attr_accessor :format
 
     class << self
@@ -30,7 +93,7 @@ module ActiveResource
 
     # The +site+ parameter is required and will set the +site+
     # attribute to the URI for the remote resource service.
-    def initialize(site, format = ActiveResource::Formats::JsonFormat)
+    def initialize(site, format = ActiveResource::Formats[:xml])
       raise ArgumentError, 'Missing site URI' unless site
       @user = @password = nil
       self.site = site
@@ -39,32 +102,27 @@ module ActiveResource
 
     # Set URI for remote service.
     def site=(site)
-      @site = site.is_a?(URI) ? site : URI.parser.parse(site)
-      @user = URI.parser.unescape(@site.user) if @site.user
-      @password = URI.parser.unescape(@site.password) if @site.password
+      @site = site.is_a?(URI) ? site : URI.parse(site)
+      @user = URI.decode(@site.user) if @site.user
+      @password = URI.decode(@site.password) if @site.password
     end
 
     # Set the proxy for remote service.
     def proxy=(proxy)
-      @proxy = proxy.is_a?(URI) ? proxy : URI.parser.parse(proxy)
+      @proxy = proxy.is_a?(URI) ? proxy : URI.parse(proxy)
     end
 
-    # Sets the user for remote service.
+    # Set the user for remote service.
     def user=(user)
       @user = user
     end
 
-    # Sets the password for remote service.
+    # Set password for remote service.
     def password=(password)
       @password = password
     end
 
-    # Sets the auth type for remote service.
-    def auth_type=(auth_type)
-      @auth_type = legitimize_auth_type(auth_type)
-    end
-
-    # Sets the number of seconds after which HTTP requests to the remote service should time out.
+    # Set the number of seconds after which HTTP requests to the remote service should time out.
     def timeout=(timeout)
       @timeout = timeout
     end
@@ -74,44 +132,44 @@ module ActiveResource
       @ssl_options = opts
     end
 
-    # Executes a GET request.
+    # Execute a GET request.
     # Used to get (find) resources.
     def get(path, headers = {})
-      with_auth { request(:get, path, build_request_headers(headers, :get, self.site.merge(path))) }
+      format.decode(request(:get, path, build_request_headers(headers, :get)).body)
     end
 
-    # Executes a DELETE request (see HTTP protocol documentation if unfamiliar).
+    # Execute a DELETE request (see HTTP protocol documentation if unfamiliar).
     # Used to delete resources.
     def delete(path, headers = {})
-      with_auth { request(:delete, path, build_request_headers(headers, :delete, self.site.merge(path))) }
+      request(:delete, path, build_request_headers(headers, :delete))
     end
 
-    # Executes a PUT request (see HTTP protocol documentation if unfamiliar).
+    # Execute a PUT request (see HTTP protocol documentation if unfamiliar).
     # Used to update resources.
     def put(path, body = '', headers = {})
-      with_auth { request(:put, path, body.to_s, build_request_headers(headers, :put, self.site.merge(path))) }
+      request(:put, path, body.to_s, build_request_headers(headers, :put))
     end
 
-    # Executes a POST request.
+    # Execute a POST request.
     # Used to create new resources.
     def post(path, body = '', headers = {})
-      with_auth { request(:post, path, body.to_s, build_request_headers(headers, :post, self.site.merge(path))) }
+      request(:post, path, body.to_s, build_request_headers(headers, :post))
     end
 
-    # Executes a HEAD request.
+    # Execute a HEAD request.
     # Used to obtain meta-information about resources, such as whether they exist and their size (via response headers).
     def head(path, headers = {})
-      with_auth { request(:head, path, build_request_headers(headers, :head, self.site.merge(path))) }
+      request(:head, path, build_request_headers(headers, :head))
     end
 
+
     private
-      # Makes a request to the remote service.
+      # Makes request to remote service.
       def request(method, path, *arguments)
-        result = ActiveSupport::Notifications.instrument("request.active_resource") do |payload|
-          payload[:method]      = method
-          payload[:request_uri] = "#{site.scheme}://#{site.host}:#{site.port}#{path}"
-          payload[:result]      = http.send(method, path, *arguments)
-        end
+        logger.info "#{method.to_s.upcase} #{site.scheme}://#{site.host}:#{site.port}#{path}" if logger
+        result = nil
+        ms = Benchmark.ms { result = http.send(method, path, *arguments) }
+        logger.info "--> %d %s (%d %.0fms)" % [result.code, result.message, result.body ? result.body.length : 0, ms] if logger
         handle_response(result)
       rescue Timeout::Error => e
         raise TimeoutError.new(e.message)
@@ -119,10 +177,10 @@ module ActiveResource
         raise SSLError.new(e.message)
       end
 
-      # Handles response and error codes from the remote service.
+      # Handles response and error codes from remote service.
       def handle_response(response)
         case response.code.to_i
-          when 301, 302, 303, 307
+          when 301,302
             raise(Redirection.new(response))
           when 200...400
             response
@@ -151,7 +209,7 @@ module ActiveResource
         end
       end
 
-      # Creates new Net::HTTP instance for communication with the
+      # Creates new Net::HTTP instance for communication with
       # remote service and resources.
       def http
         configure_http(new_http)
@@ -205,83 +263,21 @@ module ActiveResource
       end
 
       # Builds headers for request to remote service.
-      def build_request_headers(headers, http_method, uri)
-        authorization_header(http_method, uri).update(default_header).update(http_format_header(http_method)).update(headers)
+      def build_request_headers(headers, http_method=nil)
+        authorization_header.update(default_header).update(http_format_header(http_method)).update(headers)
       end
 
-      def response_auth_header
-        @response_auth_header ||= ""
-      end
-
-      def with_auth
-        retried ||= false
-        yield
-      rescue UnauthorizedAccess => e
-        raise if retried || auth_type != :digest
-        @response_auth_header = e.response['WWW-Authenticate']
-        retried = true
-        retry
-      end
-
-      def authorization_header(http_method, uri)
-        if @user || @password
-          if auth_type == :digest
-            { 'Authorization' => digest_auth_header(http_method, uri) }
-          else
-            { 'Authorization' => 'Basic ' + ["#{@user}:#{@password}"].pack('m').delete("\r\n") }
-          end
-        else
-          {}
-        end
-      end
-
-      def digest_auth_header(http_method, uri)
-        params = extract_params_from_response
-
-        request_uri = uri.path
-        request_uri << "?#{uri.query}" if uri.query
-
-        ha1 = Digest::MD5.hexdigest("#{@user}:#{params['realm']}:#{@password}")
-        ha2 = Digest::MD5.hexdigest("#{http_method.to_s.upcase}:#{request_uri}")
-
-        params.merge!('cnonce' => client_nonce)
-        request_digest = Digest::MD5.hexdigest([ha1, params['nonce'], "0", params['cnonce'], params['qop'], ha2].join(":"))
-        "Digest #{auth_attributes_for(uri, request_digest, params)}"
-      end
-
-      def client_nonce
-        Digest::MD5.hexdigest("%x" % (Time.now.to_i + rand(65535)))
-      end
-
-      def extract_params_from_response
-        params = {}
-        if response_auth_header =~ /^(\w+) (.*)/
-          $2.gsub(/(\w+)="(.*?)"/) { params[$1] = $2 }
-        end
-        params
-      end
-
-      def auth_attributes_for(uri, request_digest, params)
-        [
-          %Q(username="#{@user}"),
-          %Q(realm="#{params['realm']}"),
-          %Q(qop="#{params['qop']}"),
-          %Q(uri="#{uri.path}"),
-          %Q(nonce="#{params['nonce']}"),
-          %Q(nc="0"),
-          %Q(cnonce="#{params['cnonce']}"),
-          %Q(opaque="#{params['opaque']}"),
-          %Q(response="#{request_digest}")].join(", ")
+      # Sets authorization header
+      def authorization_header
+        (@user || @password ? { 'Authorization' => 'Basic ' + ["#{@user}:#{ @password}"].pack('m').delete("\r\n") } : {})
       end
 
       def http_format_header(http_method)
         {HTTP_FORMAT_HEADER_NAMES[http_method] => format.mime_type}
       end
 
-      def legitimize_auth_type(auth_type)
-        return :basic if auth_type.nil?
-        auth_type = auth_type.to_sym
-        auth_type.in?([:basic, :digest]) ? auth_type : :basic
+      def logger #:nodoc:
+        Base.logger
       end
   end
 end

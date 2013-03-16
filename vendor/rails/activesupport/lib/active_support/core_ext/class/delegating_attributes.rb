@@ -1,44 +1,47 @@
-require 'active_support/core_ext/object/blank'
-require 'active_support/core_ext/array/extract_options'
-require 'active_support/core_ext/kernel/singleton_class'
-require 'active_support/core_ext/module/remove_method'
-
+# These class attributes behave something like the class
+# inheritable accessors.  But instead of copying the hash over at
+# the time the subclass is first defined,  the accessors simply
+# delegate to their superclass unless they have been given a 
+# specific value.  This stops the strange situation where values 
+# set after class definition don't get applied to subclasses.
 class Class
-  def superclass_delegating_accessor(name, options = {})
-    # Create private _name and _name= methods that can still be used if the public
-    # methods are overridden. This allows
-    _superclass_delegating_accessor("_#{name}")
-
-    # Generate the public methods name, name=, and name?
-    # These methods dispatch to the private _name, and _name= methods, making them
-    # overridable
-    singleton_class.send(:define_method, name) { send("_#{name}") }
-    singleton_class.send(:define_method, "#{name}?") { !!send("_#{name}") }
-    singleton_class.send(:define_method, "#{name}=") { |value| send("_#{name}=", value) }
-
-    # If an instance_reader is needed, generate methods for name and name= on the
-    # class itself, so instances will be able to see them
-    define_method(name) { send("_#{name}") } if options[:instance_reader] != false
-    define_method("#{name}?") { !!send("#{name}") } if options[:instance_reader] != false
-  end
-
-private
-
-  # Take the object being set and store it in a method. This gives us automatic
-  # inheritance behavior, without having to store the object in an instance
-  # variable and look up the superclass chain manually.
-  def _stash_object_in_method(object, method, instance_reader = true)
-    singleton_class.remove_possible_method(method)
-    singleton_class.send(:define_method, method) { object }
-    remove_possible_method(method)
-    define_method(method) { object } if instance_reader
-  end
-
-  def _superclass_delegating_accessor(name, options = {})
-    singleton_class.send(:define_method, "#{name}=") do |value|
-      _stash_object_in_method(value, name, options[:instance_reader] != false)
+  def superclass_delegating_reader(*names)
+    class_name_to_stop_searching_on = self.superclass.name.blank? ? "Object" : self.superclass.name
+    names.each do |name|
+      class_eval <<-EOS
+      def self.#{name}                                            # def self.only_reader
+        if defined?(@#{name})                                     #   if defined?(@only_reader)
+          @#{name}                                                #     @only_reader
+        elsif superclass < #{class_name_to_stop_searching_on} &&  #   elsif superclass < Object &&
+              superclass.respond_to?(:#{name})                    #         superclass.respond_to?(:only_reader)
+          superclass.#{name}                                      #     superclass.only_reader
+        end                                                       #   end
+      end                                                         # end
+      def #{name}                                                 # def only_reader
+        self.class.#{name}                                        #   self.class.only_reader
+      end                                                         # end
+      def self.#{name}?                                           # def self.only_reader?
+        !!#{name}                                                 #   !!only_reader
+      end                                                         # end
+      def #{name}?                                                # def only_reader?
+        !!#{name}                                                 #   !!only_reader
+      end                                                         # end
+      EOS
     end
-    send("#{name}=", nil)
   end
 
+  def superclass_delegating_writer(*names)
+    names.each do |name|
+      class_eval <<-EOS
+        def self.#{name}=(value)  # def self.only_writer=(value)
+          @#{name} = value        #   @only_writer = value
+        end                       # end
+      EOS
+    end
+  end
+
+  def superclass_delegating_accessor(*names)
+    superclass_delegating_reader(*names)
+    superclass_delegating_writer(*names)
+  end
 end

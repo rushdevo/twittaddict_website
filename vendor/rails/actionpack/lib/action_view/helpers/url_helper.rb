@@ -1,47 +1,22 @@
-require 'action_view/helpers/javascript_helper'
-require 'active_support/core_ext/array/access'
-require 'active_support/core_ext/hash/keys'
-require 'active_support/core_ext/string/output_safety'
-require 'action_dispatch'
+#require 'action_view/helpers/javascript_helper'
 
 module ActionView
-  # = Action View URL Helpers
   module Helpers #:nodoc:
     # Provides a set of methods for making links and getting URLs that
-    # depend on the routing subsystem (see ActionDispatch::Routing).
+    # depend on the routing subsystem (see ActionController::Routing).
     # This allows you to use the same format for links in views
     # and controllers.
     module UrlHelper
-      # This helper may be included in any class that includes the
-      # URL helpers of a routes (routes.url_helpers). Some methods
-      # provided here will only work in the context of a request
-      # (link_to_unless_current, for instance), which must be provided
-      # as a method called #request on the context.
-
-      extend ActiveSupport::Concern
-
-      include ActionDispatch::Routing::UrlFor
-      include TagHelper
-
-      def _routes_context
-        controller
-      end
-
-      # Need to map default url options to controller one.
-      # def default_url_options(*args) #:nodoc:
-      #   controller.send(:default_url_options, *args)
-      # end
-      #
-      def url_options
-        return super unless controller.respond_to?(:url_options)
-        controller.url_options
-      end
+      include JavaScriptHelper
 
       # Returns the URL for the set of +options+ provided. This takes the
       # same options as +url_for+ in Action Controller (see the
-      # documentation for <tt>ActionController::Base#url_for</tt>). Note that by default
-      # <tt>:only_path</tt> is <tt>true</tt> so you'll get the relative "/controller/action"
-      # instead of the fully qualified URL like "http://example.com/controller/action".
+      # documentation for ActionController::Base#url_for). Note that by default
+      # <tt>:only_path</tt> is <tt>true</tt> so you'll get the relative /controller/action
+      # instead of the fully qualified URL like http://example.com/controller/action.
+      #
+      # When called from a view, url_for returns an HTML escaped url. If you
+      # need an unescaped url, pass <tt>:escape => false</tt> in the +options+.
       #
       # ==== Options
       # * <tt>:anchor</tt> - Specifies the anchor name to be appended to the path.
@@ -52,13 +27,14 @@ module ActionView
       # * <tt>:protocol</tt> - Overrides the default (current) protocol if provided.
       # * <tt>:user</tt> - Inline HTTP authentication (only plucked out if <tt>:password</tt> is also present).
       # * <tt>:password</tt> - Inline HTTP authentication (only plucked out if <tt>:user</tt> is also present).
+      # * <tt>:escape</tt> - Determines whether the returned URL will be HTML escaped or not (<tt>true</tt> by default).
       #
       # ==== Relying on named routes
       #
-      # Passing a record (like an Active Record or Active Resource) instead of a Hash as the options parameter will
-      # trigger the named route for that record. The lookup will happen on the name of the class. So passing a
-      # Workshop object will attempt to use the +workshop_path+ route. If you have a nested route, such as
-      # +admin_workshop_path+ you'll have to call that explicitly (it's impossible for +url_for+ to guess that route).
+      # If you instead of a hash pass a record (like an Active Record or Active Resource) as the options parameter,
+      # you'll trigger the named route for that record. The lookup will happen on the name of the class. So passing
+      # a Workshop object will attempt to use the workshop_path route. If you have a nested route, such as
+      # admin_workshop_path you'll have to call that explicitly (it's impossible for url_for to guess that route).
       #
       # ==== Examples
       #   <%= url_for(:action => 'index') %>
@@ -68,24 +44,24 @@ module ActionView
       #   # => /books/find
       #
       #   <%= url_for(:action => 'login', :controller => 'members', :only_path => false, :protocol => 'https') %>
-      #   # => https://www.example.com/members/login/
+      #   # => https://www.railsapplication.com/members/login/
       #
       #   <%= url_for(:action => 'play', :anchor => 'player') %>
       #   # => /messages/play/#player
       #
-      #   <%= url_for(:action => 'jump', :anchor => 'tax&ship') %>
+      #   <%= url_for(:action => 'checkout', :anchor => 'tax&ship') %>
+      #   # => /testing/jump/#tax&amp;ship
+      #
+      #   <%= url_for(:action => 'checkout', :anchor => 'tax&ship', :escape => false) %>
       #   # => /testing/jump/#tax&ship
       #
       #   <%= url_for(Workshop.new) %>
-      #   # relies on Workshop answering a persisted? call (and in this case returning false)
+      #   # relies on Workshop answering a new_record? call (and in this case returning true)
       #   # => /workshops
       #
       #   <%= url_for(@workshop) %>
-      #   # calls @workshop.to_param which by default returns the id
+      #   # calls @workshop.to_s
       #   # => /workshops/5
-      #
-      #   # to_param can be re-defined in a model to provide different URL names:
-      #   # => /workshops/1-workshop-name
       #
       #   <%= url_for("http://www.example.com") %>
       #   # => http://www.example.com
@@ -99,68 +75,72 @@ module ActionView
       #   # => javascript:history.back()
       def url_for(options = {})
         options ||= {}
-        case options
+        url = case options
         when String
+          escape = true
           options
         when Hash
-          options = options.symbolize_keys.reverse_merge!(:only_path => options[:host].nil?)
-          super
+          options = { :only_path => options[:host].nil? }.update(options.symbolize_keys)
+          escape  = options.key?(:escape) ? options.delete(:escape) : true
+          @controller.send(:url_for, options)
         when :back
-          controller.request.env["HTTP_REFERER"] || 'javascript:history.back()'
+          escape = false
+          @controller.request.env["HTTP_REFERER"] || 'javascript:history.back()'
         else
+          escape = false
           polymorphic_path(options)
         end
+
+        escape ? escape_once(url).html_safe : url
       end
 
-      # Creates a link tag of the given +name+ using a URL created by the set of +options+.
-      # See the valid options in the documentation for +url_for+. It's also possible to
-      # pass a String instead of an options hash, which generates a link tag that uses the
-      # value of the String as the href for the link. Using a <tt>:back</tt> Symbol instead
-      # of an options hash will generate a link to the referrer (a JavaScript back link
-      # will be used in place of a referrer if none exists). If +nil+ is passed as the name
-      # the value of the link itself will become the name.
+      # Creates a link tag of the given +name+ using a URL created by the set
+      # of +options+. See the valid options in the documentation for
+      # url_for. It's also possible to pass a string instead
+      # of an options hash to get a link tag that uses the value of the string as the
+      # href for the link, or use <tt>:back</tt> to link to the referrer - a JavaScript back
+      # link will be used in place of a referrer if none exists. If nil is passed as
+      # a name, the link itself will become the name.
       #
       # ==== Signatures
       #
-      #   link_to(body, url, html_options = {})
-      #     # url is a String; you can use URL helpers like
-      #     # posts_path
-      #
-      #   link_to(body, url_options = {}, html_options = {})
-      #     # url_options, except :confirm or :method,
-      #     # is passed to url_for
-      #
-      #   link_to(options = {}, html_options = {}) do
-      #     # name
-      #   end
-      #
-      #   link_to(url, html_options = {}) do
+      #   link_to(name, options = {}, html_options = nil)
+      #   link_to(options = {}, html_options = nil) do
       #     # name
       #   end
       #
       # ==== Options
-      # * <tt>:confirm => 'question?'</tt> - This will allow the unobtrusive JavaScript
-      #   driver to prompt with the question specified. If the user accepts, the link is
+      # * <tt>:confirm => 'question?'</tt> - This will add a JavaScript confirm
+      #   prompt with the question specified. If the user accepts, the link is
       #   processed normally, otherwise no action is taken.
+      # * <tt>:popup => true || array of window options</tt> - This will force the
+      #   link to open in a popup window. By passing true, a default browser window
+      #   will be opened with the URL. You can also specify an array of options
+      #   that are passed-thru to JavaScripts window.open method.
       # * <tt>:method => symbol of HTTP verb</tt> - This modifier will dynamically
       #   create an HTML form and immediately submit the form for processing using
       #   the HTTP verb specified. Useful for having links perform a POST operation
       #   in dangerous actions like deleting a record (which search bots can follow
       #   while spidering your site). Supported verbs are <tt>:post</tt>, <tt>:delete</tt> and <tt>:put</tt>.
       #   Note that if the user has JavaScript disabled, the request will fall back
-      #   to using GET. If <tt>:href => '#'</tt> is used and the user has JavaScript
-      #   disabled clicking the link will have no effect. If you are relying on the
-      #   POST behavior, you should check for it in your controller's action by using
-      #   the request object's methods for <tt>post?</tt>, <tt>delete?</tt> or <tt>put?</tt>.
-      # * <tt>:remote => true</tt> - This will allow the unobtrusive JavaScript
-      #   driver to make an Ajax request to the URL in question instead of following
-      #   the link. The drivers each provide mechanisms for listening for the
-      #   completion of the Ajax request and performing JavaScript operations once
-      #   they're complete
+      #   to using GET. If you are relying on the POST behavior, you should check
+      #   for it in your controller's action by using the request object's methods
+      #   for <tt>post?</tt>, <tt>delete?</tt> or <tt>put?</tt>.
+      # * The +html_options+ will accept a hash of html attributes for the link tag.
+      #
+      # Note that if the user has JavaScript disabled, the request will fall back
+      # to using GET. If <tt>:href => '#'</tt> is used and the user has JavaScript disabled
+      # clicking the link will have no effect. If you are relying on the POST
+      # behavior, your should check for it in your controller's action by using the
+      # request object's methods for <tt>post?</tt>, <tt>delete?</tt> or <tt>put?</tt>.
+      #
+      # You can mix and match the +html_options+ with the exception of
+      # <tt>:popup</tt> and <tt>:method</tt> which will raise an ActionView::ActionViewError
+      # exception.
       #
       # ==== Examples
       # Because it relies on +url_for+, +link_to+ supports both older-style controller/action/id arguments
-      # and newer RESTful routes. Current Rails style favors RESTful routes whenever possible, so base
+      # and newer RESTful routes.  Current Rails style favors RESTful routes whenever possible, so base
       # your application on resources and use
       #
       #   link_to "Profile", profile_path(@profile)
@@ -186,14 +166,12 @@ module ActionView
       #   link_to "Profiles", :controller => "profiles"
       #   # => <a href="/profiles">Profiles</a>
       #
-      # You can use a block as well if your link target is hard to fit into the name parameter. ERB example:
+      # You can use a block as well if your link target is hard to fit into the name parameter. ERb example:
       #
-      #   <%= link_to(@profile) do %>
-      #     <strong><%= @profile.name %></strong> -- <span>Check it out!</span>
+      #   <% link_to(@profile) do %>
+      #     <strong><%= @profile.name %></strong> -- <span>Check it out!!</span>
       #   <% end %>
-      #   # => <a href="/profiles/1">
-      #          <strong>David</strong> -- <span>Check it out!</span>
-      #        </a>
+      #   # => <a href="/profiles/1"><strong>David</strong> -- <span>Check it out!!</span></a>
       #
       # Classes and ids for CSS are easy to produce:
       #
@@ -221,31 +199,45 @@ module ActionView
       #   link_to "Nonsense search", searches_path(:foo => "bar", :baz => "quux")
       #   # => <a href="/searches?foo=bar&amp;baz=quux">Nonsense search</a>
       #
-      # The two options specific to +link_to+ (<tt>:confirm</tt> and <tt>:method</tt>) are used as follows:
+      # The three options specific to +link_to+ (<tt>:confirm</tt>, <tt>:popup</tt>, and <tt>:method</tt>) are used as follows:
       #
       #   link_to "Visit Other Site", "http://www.rubyonrails.org/", :confirm => "Are you sure?"
-      #   # => <a href="http://www.rubyonrails.org/" data-confirm="Are you sure?"">Visit Other Site</a>
+      #   # => <a href="http://www.rubyonrails.org/" onclick="return confirm('Are you sure?');">Visit Other Site</a>
       #
-      #   link_to("Destroy", "http://www.example.com", :method => :delete, :confirm => "Are you sure?")
-      #   # => <a href='http://www.example.com' rel="nofollow" data-method="delete" data-confirm="Are you sure?">Destroy</a>
+      #   link_to "Help", { :action => "help" }, :popup => true
+      #   # => <a href="/testing/help/" onclick="window.open(this.href);return false;">Help</a>
+      #
+      #   link_to "View Image", @image, :popup => ['new_window_name', 'height=300,width=600']
+      #   # => <a href="/images/9" onclick="window.open(this.href,'new_window_name','height=300,width=600');return false;">View Image</a>
+      #
+      #   link_to "Delete Image", @image, :confirm => "Are you sure?", :method => :delete
+      #   # => <a href="/images/9" onclick="if (confirm('Are you sure?')) { var f = document.createElement('form');
+      #        f.style.display = 'none'; this.parentNode.appendChild(f); f.method = 'POST'; f.action = this.href;
+      #        var m = document.createElement('input'); m.setAttribute('type', 'hidden'); m.setAttribute('name', '_method');
+      #        m.setAttribute('value', 'delete'); f.appendChild(m);f.submit(); };return false;">Delete Image</a>
       def link_to(*args, &block)
         if block_given?
           options      = args.first || {}
           html_options = args.second
-          link_to(capture(&block), options, html_options)
+          concat(link_to(capture(&block), options, html_options))
         else
-          name         = args[0]
-          options      = args[1] || {}
-          html_options = args[2]
+          name         = args.first
+          options      = args.second || {}
+          html_options = args.third
 
-          html_options = convert_options_to_data_attributes(options, html_options)
           url = url_for(options)
 
-          href = html_options['href']
-          tag_options = tag_options(html_options)
+          if html_options
+            html_options = html_options.stringify_keys
+            href = html_options['href']
+            convert_options_to_javascript!(html_options, url)
+            tag_options = tag_options(html_options)
+          else
+            tag_options = nil
+          end
 
-          href_attr = "href=\"#{ERB::Util.html_escape(url)}\"" unless href
-          "<a #{href_attr}#{tag_options}>#{ERB::Util.html_escape(name || url)}</a>".html_safe
+          href_attr = "href=\"#{url}\"" unless href
+          "<a #{href_attr}#{tag_options}>#{name || url}</a>".html_safe
         end
       end
 
@@ -253,74 +245,44 @@ module ActionView
       # by the set of +options+. This is the safest method to ensure links that
       # cause changes to your data are not triggered by search bots or accelerators.
       # If the HTML button does not work with your layout, you can also consider
-      # using the +link_to+ method with the <tt>:method</tt> modifier as described in
-      # the +link_to+ documentation.
+      # using the link_to method with the <tt>:method</tt> modifier as described in
+      # the link_to documentation.
       #
-      # By default, the generated form element has a class name of <tt>button_to</tt>
-      # to allow styling of the form itself and its children. This can be changed
-      # using the <tt>:form_class</tt> modifier within +html_options+. You can control
+      # The generated FORM element has a class name of <tt>button-to</tt>
+      # to allow styling of the form itself and its children. You can control
       # the form submission and input element behavior using +html_options+.
       # This method accepts the <tt>:method</tt> and <tt>:confirm</tt> modifiers
-      # described in the +link_to+ documentation. If no <tt>:method</tt> modifier
+      # described in the link_to documentation. If no <tt>:method</tt> modifier
       # is given, it will default to performing a POST operation. You can also
       # disable the button by passing <tt>:disabled => true</tt> in +html_options+.
       # If you are using RESTful routes, you can pass the <tt>:method</tt>
       # to change the HTTP verb used to submit the form.
       #
       # ==== Options
-      # The +options+ hash accepts the same options as +url_for+.
+      # The +options+ hash accepts the same options at url_for.
       #
       # There are a few special +html_options+:
-      # * <tt>:method</tt> - Symbol of HTTP verb. Supported verbs are <tt>:post</tt>, <tt>:get</tt>,
-      #   <tt>:delete</tt> and <tt>:put</tt>. By default it will be <tt>:post</tt>.
-      # * <tt>:disabled</tt> - If set to true, it will generate a disabled button.
-      # * <tt>:confirm</tt> - This will use the unobtrusive JavaScript driver to
+      # * <tt>:method</tt> - Specifies the anchor name to be appended to the path.
+      # * <tt>:disabled</tt> - Specifies the anchor name to be appended to the path.
+      # * <tt>:confirm</tt> - This will add a JavaScript confirm
       #   prompt with the question specified. If the user accepts, the link is
       #   processed normally, otherwise no action is taken.
-      # * <tt>:remote</tt> -  If set to true, will allow the Unobtrusive JavaScript drivers to control the
-      #   submit behavior. By default this behavior is an ajax submit.
-      # * <tt>:form</tt> - This hash will be form attributes
-      # * <tt>:form_class</tt> - This controls the class of the form within which the submit button will
-      #   be placed
       #
       # ==== Examples
       #   <%= button_to "New", :action => "new" %>
-      #   # => "<form method="post" action="/controller/new" class="button_to">
+      #   # => "<form method="post" action="/controller/new" class="button-to">
       #   #      <div><input value="New" type="submit" /></div>
       #   #    </form>"
       #
-      #
-      #   <%= button_to "New", :action => "new", :form_class => "new-thing" %>
-      #   # => "<form method="post" action="/controller/new" class="new-thing">
-      #   #      <div><input value="New" type="submit" /></div>
-      #   #    </form>"
-      #
-      #
-      #   <%= button_to "Create", :action => "create", :remote => true, :form => { "data-type" => "json" } %>
-      #   # => "<form method="post" action="/images/create" class="button_to" data-remote="true" data-type="json">
-      #   #      <div><input value="Create" type="submit" /></div>
-      #   #    </form>"
-      #
-      #      
-      #   <%= button_to "Delete Image", { :action => "delete", :id => @image.id },
-      #             :confirm => "Are you sure?", :method => :delete %>
-      #   # => "<form method="post" action="/images/delete/1" class="button_to">
+      #   button_to "Delete Image", { :action => "delete", :id => @image.id },
+      #             :confirm => "Are you sure?", :method => :delete
+      #   # => "<form method="post" action="/images/delete/1" class="button-to">
       #   #      <div>
       #   #        <input type="hidden" name="_method" value="delete" />
-      #   #        <input data-confirm='Are you sure?' value="Delete" type="submit" />
+      #   #        <input onclick="return confirm('Are you sure?');"
+      #   #              value="Delete" type="submit" />
       #   #      </div>
       #   #    </form>"
-      #
-      #
-      #   <%= button_to('Destroy', 'http://www.example.com', :confirm => 'Are you sure?',
-      #             :method => "delete", :remote => true, :disable_with => 'loading...') %>
-      #   # => "<form class='button_to' method='post' action='http://www.example.com' data-remote='true'>
-      #   #       <div>
-      #   #         <input name='_method' value='delete' type='hidden' />
-      #   #         <input value='Destroy' type='submit' disable_with='loading...' data-confirm='Are you sure?' />
-      #   #       </div>
-      #   #     </form>"
-      #   #
       def button_to(name, options = {}, html_options = {})
         html_options = html_options.stringify_keys
         convert_boolean_attributes!(html_options, %w( disabled ))
@@ -331,34 +293,30 @@ module ActionView
         end
 
         form_method = method.to_s == 'get' ? 'get' : 'post'
-        form_options = html_options.delete('form') || {}
-        form_options[:class] ||= html_options.delete('form_class') || 'button_to'
-        
-        remote = html_options.delete('remote')
-        
+
         request_token_tag = ''
         if form_method == 'post' && protect_against_forgery?
           request_token_tag = tag(:input, :type => "hidden", :name => request_forgery_protection_token.to_s, :value => form_authenticity_token)
         end
 
+        if confirm = html_options.delete("confirm")
+          html_options["onclick"] = "return #{confirm_javascript_function(confirm)};"
+        end
+
         url = options.is_a?(String) ? options : self.url_for(options)
         name ||= url
 
-        html_options = convert_options_to_data_attributes(options, html_options)
-
         html_options.merge!("type" => "submit", "value" => name)
 
-        form_options.merge!(:method => form_method, :action => url)
-        form_options.merge!("data-remote" => "true") if remote
-        
-        "#{tag(:form, form_options, true)}<div>#{method_tag}#{tag("input", html_options)}#{request_token_tag}</div></form>".html_safe
+        ("<form method=\"#{form_method}\" action=\"#{escape_once url}\" class=\"button-to\"><div>" +
+          method_tag + tag("input", html_options) + request_token_tag + "</div></form>").html_safe
       end
 
 
       # Creates a link tag of the given +name+ using a URL created by the set of
       # +options+ unless the current request URI is the same as the links, in
       # which case only the name is returned (or the given block is yielded, if
-      # one exists). You can give +link_to_unless_current+ a block which will
+      # one exists).  You can give link_to_unless_current a block which will
       # specialize the default behavior (e.g., show a "Start Here" link rather
       # than the link's text).
       #
@@ -384,13 +342,13 @@ module ActionView
       #     <li><a href="/controller/about">About Us</a></li>
       #   </ul>
       #
-      # The implicit block given to +link_to_unless_current+ is evaluated if the current
-      # action is the action given. So, if we had a comments page and wanted to render a
+      # The implicit block given to link_to_unless_current is evaluated if the current
+      # action is the action given.  So, if we had a comments page and wanted to render a
       # "Go Back" link instead of a link to the comments page, we could do something like this...
       #
       #    <%=
-      #        link_to_unless_current("Comment", { :controller => "comments", :action => "new" }) do
-      #           link_to("Go back", { :controller => "posts", :action => "index" })
+      #        link_to_unless_current("Comment", { :controller => 'comments', :action => 'new}) do
+      #           link_to("Go back", { :controller => 'posts', :action => 'index' })
       #        end
       #     %>
       def link_to_unless_current(name, options = {}, html_options = {}, &block)
@@ -401,7 +359,7 @@ module ActionView
       # +options+ unless +condition+ is true, in which case only the name is
       # returned. To specialize the default behavior (i.e., show a login link rather
       # than just the plaintext link text), you can pass a block that
-      # accepts the name or the full argument list for +link_to_unless+.
+      # accepts the name or the full argument list for link_to_unless.
       #
       # ==== Examples
       #   <%= link_to_unless(@current_user.nil?, "Reply", { :action => "reply" }) %>
@@ -420,7 +378,7 @@ module ActionView
       def link_to_unless(condition, name, options = {}, html_options = {}, &block)
         if condition
           if block_given?
-            block.arity <= 1 ? capture(name, &block) : capture(name, options, html_options, &block)
+            block.arity <= 1 ? yield(name) : yield(name, options, html_options)
           else
             name
           end
@@ -430,10 +388,10 @@ module ActionView
       end
 
       # Creates a link tag of the given +name+ using a URL created by the set of
-      # +options+ if +condition+ is true, otherwise only the name is
+      # +options+ if +condition+ is true, in which case only the name is
       # returned. To specialize the default behavior, you can pass a block that
-      # accepts the name or the full argument list for +link_to_unless+ (see the examples
-      # in +link_to_unless+).
+      # accepts the name or the full argument list for link_to_unless (see the examples
+      # in link_to_unless).
       #
       # ==== Examples
       #   <%= link_to_if(@current_user.nil?, "Login", { :controller => "sessions", :action => "new" }) %>
@@ -457,27 +415,27 @@ module ActionView
       # also used as the name of the link unless +name+ is specified. Additional
       # HTML attributes for the link can be passed in +html_options+.
       #
-      # +mail_to+ has several methods for hindering email harvesters and customizing
+      # mail_to has several methods for hindering email harvesters and customizing
       # the email itself by passing special keys to +html_options+.
       #
       # ==== Options
-      # * <tt>:encode</tt> - This key will accept the strings "javascript" or "hex".
-      #   Passing "javascript" will dynamically create and encode the mailto link then
+      # * <tt>:encode</tt>  - This key will accept the strings "javascript" or "hex".
+      #   Passing "javascript" will dynamically create and encode the mailto: link then
       #   eval it into the DOM of the page. This method will not show the link on
       #   the page if the user has JavaScript disabled. Passing "hex" will hex
-      #   encode the +email_address+ before outputting the mailto link.
-      # * <tt>:replace_at</tt> - When the link +name+ isn't provided, the
+      #   encode the +email_address+ before outputting the mailto: link.
+      # * <tt>:replace_at</tt>  - When the link +name+ isn't provided, the
       #   +email_address+ is used for the link label. You can use this option to
       #   obfuscate the +email_address+ by substituting the @ sign with the string
       #   given as the value.
-      # * <tt>:replace_dot</tt> - When the link +name+ isn't provided, the
+      # * <tt>:replace_dot</tt>  - When the link +name+ isn't provided, the
       #   +email_address+ is used for the link label. You can use this option to
       #   obfuscate the +email_address+ by substituting the . in the email with the
       #   string given as the value.
-      # * <tt>:subject</tt> - Preset the subject line of the email.
+      # * <tt>:subject</tt>  - Preset the subject line of the email.
       # * <tt>:body</tt> - Preset the body of the email.
-      # * <tt>:cc</tt> - Carbon Copy additional recipients on the email.
-      # * <tt>:bcc</tt> - Blind Carbon Copy additional recipients on the email.
+      # * <tt>:cc</tt>  - Carbon Copy addition recipients on the email.
+      # * <tt>:bcc</tt>  - Blind Carbon Copy additional recipients on the email.
       #
       # ==== Examples
       #   mail_to "me@domain.com"
@@ -496,44 +454,44 @@ module ActionView
       #            :subject => "This is an example email"
       #   # => <a href="mailto:me@domain.com?cc=ccaddress@domain.com&subject=This%20is%20an%20example%20email">My email</a>
       def mail_to(email_address, name = nil, html_options = {})
-        email_address = ERB::Util.html_escape(email_address)
-
         html_options = html_options.stringify_keys
         encode = html_options.delete("encode").to_s
+        cc, bcc, subject, body = html_options.delete("cc"), html_options.delete("bcc"), html_options.delete("subject"), html_options.delete("body")
 
-        extras = %w{ cc bcc body subject }.map { |item|
-          option = html_options.delete(item) || next
-          "#{item}=#{Rack::Utils.escape(option).gsub("+", "%20")}"
-        }.compact
-        extras = extras.empty? ? '' : '?' + ERB::Util.html_escape(extras.join('&'))
+        string = ''
+        extras = ''
+        extras << "cc=#{CGI.escape(cc).gsub("+", "%20")}&" unless cc.nil?
+        extras << "bcc=#{CGI.escape(bcc).gsub("+", "%20")}&" unless bcc.nil?
+        extras << "body=#{CGI.escape(body).gsub("+", "%20")}&" unless body.nil?
+        extras << "subject=#{CGI.escape(subject).gsub("+", "%20")}&" unless subject.nil?
+        extras = "?" << extras.gsub!(/&?$/,"") unless extras.empty?
 
-        email_address_obfuscated = email_address.to_str
-        email_address_obfuscated.gsub!(/@/, html_options.delete("replace_at")) if html_options.key?("replace_at")
-        email_address_obfuscated.gsub!(/\./, html_options.delete("replace_dot")) if html_options.key?("replace_dot")
-        case encode
-        when "javascript"
-          string = ''
-          html   = content_tag("a", name || email_address_obfuscated.html_safe, html_options.merge("href" => "mailto:#{email_address}#{extras}".html_safe))
-          html   = escape_javascript(html.to_str)
-          "document.write('#{html}');".each_byte do |c|
+        email_address_obfuscated = html_escape(email_address)
+        email_address_obfuscated.gsub!(/@/, html_options.delete("replace_at")) if html_options.has_key?("replace_at")
+        email_address_obfuscated.gsub!(/\./, html_options.delete("replace_dot")) if html_options.has_key?("replace_dot")
+
+        if encode == "javascript"
+          html = content_tag("a", name || email_address_obfuscated.html_safe, html_options.merge({ "href" => "mailto:"+html_escape(email_address)+extras }))
+          "document.write('#{escape_javascript(html)}');".each_byte do |c|
             string << sprintf("%%%x", c)
           end
-          "<script type=\"#{Mime::JS}\">eval(decodeURIComponent('#{string}'))</script>".html_safe
-        when "hex"
-          email_address_encoded = email_address_obfuscated.unpack('C*').map {|c|
-            sprintf("&#%d;", c)
-          }.join
+          "<script type=\"#{Mime::JS}\">eval(decodeURIComponent('#{string}'))</script>"
+        elsif encode == "hex"
+          email_address_encoded = ''
+          email_address_obfuscated.each_byte do |c|
+            email_address_encoded << sprintf("&#%d;", c)
+          end
 
-          string = 'mailto:'.unpack('C*').map { |c|
-            sprintf("&#%d;", c)
-          }.join + email_address.unpack('C*').map { |c|
+          protocol = 'mailto:'
+          protocol.each_byte { |c| string << sprintf("&#%d;", c) }
+
+          email_address.each_byte do |c|
             char = c.chr
-            char =~ /\w/ ? sprintf("%%%x", c) : char
-          }.join
-
-          content_tag "a", name || email_address_encoded.html_safe, html_options.merge("href" => "#{string}#{extras}".html_safe)
+            string << (char =~ /\w/ ? sprintf("%%%x", c) : char)
+          end
+          content_tag "a", name || email_address_encoded.html_safe, html_options.merge({ "href" => "#{string}#{extras}" })
         else
-          content_tag "a", name || email_address_obfuscated.html_safe, html_options.merge("href" => "mailto:#{email_address}#{extras}".html_safe)
+          content_tag "a", name || email_address_obfuscated.html_safe, html_options.merge({ "href" => "mailto:#{email_address}#{extras}" })
         end
       end
 
@@ -565,10 +523,10 @@ module ActionView
       #   current_page?(:controller => 'shop', :action => 'checkout')
       #   # => true
       #
-      #   current_page?(:controller => 'shop', :action => 'checkout', :order => 'desc', :page => '1')
+      #   current_page?(:controller => 'shop', :action => 'checkout', :order => 'desc', :page=>'1')
       #   # => true
       #
-      #   current_page?(:controller => 'shop', :action => 'checkout', :order => 'desc', :page => '2')
+      #   current_page?(:controller => 'shop', :action => 'checkout', :order => 'desc', :page=>'2')
       #   # => false
       #
       #   current_page?(:controller => 'shop', :action => 'checkout', :order => 'desc')
@@ -579,32 +537,17 @@ module ActionView
       #
       #   current_page?(:controller => 'library', :action => 'checkout')
       #   # => false
-      #
-      # Let's say we're in the <tt>/products</tt> action with method POST in case of invalid product.
-      #
-      #   current_page?(:controller => 'product', :action => 'index')
-      #   # => false
-      #
       def current_page?(options)
-        unless request
-          raise "You cannot use helpers that need to determine the current " \
-                "page unless your view context provides a Request object " \
-                "in a #request method"
-        end
-
-        return false unless request.get?
-
-        url_string = url_for(options)
-
-        # We ignore any extra parameters in the request_uri if the
-        # submitted url doesn't have any either. This lets the function
-        # work with things like ?order=asc
+        url_string = CGI.unescapeHTML(url_for(options))
+        request = @controller.request
+        # We ignore any extra parameters in the request_uri if the 
+        # submitted url doesn't have any either.  This lets the function
+        # work with things like ?order=asc 
         if url_string.index("?")
-          request_uri = request.fullpath
+          request_uri = request.request_uri
         else
-          request_uri = request.path
+          request_uri = request.request_uri.split('?').first
         end
-
         if url_string =~ /^\w+:\/\//
           url_string == "#{request.protocol}#{request.host_with_port}#{request_uri}"
         else
@@ -613,69 +556,72 @@ module ActionView
       end
 
       private
-        def convert_options_to_data_attributes(options, html_options)
-          if html_options
-            html_options = html_options.stringify_keys
-            html_options['data-remote'] = 'true' if link_to_remote_options?(options) || link_to_remote_options?(html_options)
+        def convert_options_to_javascript!(html_options, url = '')
+          confirm, popup = html_options.delete("confirm"), html_options.delete("popup")
 
-            disable_with = html_options.delete("disable_with")
-            confirm = html_options.delete('confirm')
-            method  = html_options.delete('method')
+          method, href = html_options.delete("method"), html_options['href']
 
-            html_options["data-disable-with"] = disable_with if disable_with
-            html_options["data-confirm"] = confirm if confirm
-            add_method_to_attributes!(html_options, method)   if method
-
-            html_options
-          else
-            link_to_remote_options?(options) ? {'data-remote' => 'true'} : {}
+          html_options["onclick"] = case
+            when popup && method
+              raise ActionView::ActionViewError, "You can't use :popup and :method in the same link"
+            when confirm && popup
+              "if (#{confirm_javascript_function(confirm)}) { #{popup_javascript_function(popup)} };return false;"
+            when confirm && method
+              "if (#{confirm_javascript_function(confirm)}) { #{method_javascript_function(method, url, href)} };return false;"
+            when confirm
+              "return #{confirm_javascript_function(confirm)};"
+            when method
+              "#{method_javascript_function(method, url, href)}return false;"
+            when popup
+              "#{popup_javascript_function(popup)}return false;"
+            else
+              html_options["onclick"]
           end
         end
 
-        def link_to_remote_options?(options)
-          options.is_a?(Hash) && options.key?('remote') && options.delete('remote')
+        def confirm_javascript_function(confirm)
+          "confirm('#{escape_javascript(confirm)}')"
         end
 
-        def add_method_to_attributes!(html_options, method)
-          if method && method.to_s.downcase != "get" && html_options["rel"] !~ /nofollow/
-            html_options["rel"] = "#{html_options["rel"]} nofollow".strip
+        def popup_javascript_function(popup)
+          popup.is_a?(Array) ? "window.open(this.href,'#{popup.first}','#{popup.last}');" : "window.open(this.href);"
+        end
+
+        def method_javascript_function(method, url = '', href = nil)
+          action = (href && url.size > 0) ? "'#{url}'" : 'this.href'
+          submit_function =
+            "var f = document.createElement('form'); f.style.display = 'none'; " +
+            "this.parentNode.appendChild(f); f.method = 'POST'; f.action = #{action};"
+
+          unless method == :post
+            submit_function << "var m = document.createElement('input'); m.setAttribute('type', 'hidden'); "
+            submit_function << "m.setAttribute('name', '_method'); m.setAttribute('value', '#{method}'); f.appendChild(m);"
           end
-          html_options["data-method"] = method
-        end
 
-        def options_for_javascript(options)
-          if options.empty?
-            '{}'
-          else
-            "{#{options.keys.map { |k| "#{k}:#{options[k]}" }.sort.join(', ')}}"
+          if protect_against_forgery?
+            submit_function << "var s = document.createElement('input'); s.setAttribute('type', 'hidden'); "
+            submit_function << "s.setAttribute('name', '#{request_forgery_protection_token}'); s.setAttribute('value', '#{escape_javascript form_authenticity_token}'); f.appendChild(s);"
           end
+          submit_function << "f.submit();"
         end
 
-        def array_or_string_for_javascript(option)
-          if option.kind_of?(Array)
-            "['#{option.join('\',\'')}']"
-          elsif !option.nil?
-            "'#{option}'"
-          end
-        end
-
-        # Processes the +html_options+ hash, converting the boolean
+        # Processes the _html_options_ hash, converting the boolean
         # attributes from true/false form into the form required by
-        # HTML/XHTML. (An attribute is considered to be boolean if
-        # its name is listed in the given +bool_attrs+ array.)
+        # HTML/XHTML.  (An attribute is considered to be boolean if
+        # its name is listed in the given _bool_attrs_ array.)
         #
-        # More specifically, for each boolean attribute in +html_options+
+        # More specifically, for each boolean attribute in _html_options_
         # given as:
         #
-        #   "attr" => bool_value
+        #     "attr" => bool_value
         #
-        # if the associated +bool_value+ evaluates to true, it is
+        # if the associated _bool_value_ evaluates to true, it is
         # replaced with the attribute's name; otherwise the attribute is
-        # removed from the +html_options+ hash. (See the XHTML 1.0 spec,
+        # removed from the _html_options_ hash.  (See the XHTML 1.0 spec,
         # section 4.5 "Attribute Minimization" for more:
         # http://www.w3.org/TR/xhtml1/#h-4.5)
         #
-        # Returns the updated +html_options+ hash, which is also modified
+        # Returns the updated _html_options_ hash, which is also modified
         # in place.
         #
         # Example:

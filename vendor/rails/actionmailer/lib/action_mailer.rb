@@ -1,5 +1,5 @@
 #--
-# Copyright (c) 2004-2011 David Heinemeier Hansson
+# Copyright (c) 2004-2010 David Heinemeier Hansson
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -21,29 +21,42 @@
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #++
 
-actionpack_path = File.expand_path('../../../actionpack/lib', __FILE__)
-$:.unshift(actionpack_path) if File.directory?(actionpack_path) && !$:.include?(actionpack_path)
+begin
+  require 'action_controller'
+rescue LoadError
+  actionpack_path = "#{File.dirname(__FILE__)}/../../actionpack/lib"
+  if File.directory?(actionpack_path)
+    $:.unshift actionpack_path
+    require 'action_controller'
+  end
+end
 
-require 'abstract_controller'
 require 'action_view'
-require 'action_mailer/version'
-
-# Common Active Support usage in Action Mailer
-require 'active_support/core_ext/class'
-require 'active_support/core_ext/object/blank'
-require 'active_support/core_ext/array/uniq_by'
-require 'active_support/core_ext/module/attr_internal'
-require 'active_support/core_ext/module/delegation'
-require 'active_support/core_ext/string/inflections'
-require 'active_support/lazy_load_hooks'
 
 module ActionMailer
-  extend ::ActiveSupport::Autoload
+  def self.load_all!
+    [Base, Part, ::Text::Format, ::Net::SMTP]
+  end
 
-  autoload :Collector
-  autoload :Base
-  autoload :DeliveryMethods
-  autoload :MailHelper
-  autoload :TestCase
-  autoload :TestHelper
+  autoload :AdvAttrAccessor, 'action_mailer/adv_attr_accessor'
+  autoload :Base, 'action_mailer/base'
+  autoload :Helpers, 'action_mailer/helpers'
+  autoload :Part, 'action_mailer/part'
+  autoload :PartContainer, 'action_mailer/part_container'
+  autoload :Quoting, 'action_mailer/quoting'
+  autoload :TestCase, 'action_mailer/test_case'
+  autoload :TestHelper, 'action_mailer/test_helper'
+  autoload :Utils, 'action_mailer/utils'
 end
+
+module Text
+  autoload :Format, 'action_mailer/vendor/text_format'
+end
+
+module Net
+  autoload :SMTP, 'net/smtp'
+end
+
+autoload :MailHelper, 'action_mailer/mail_helper'
+
+require 'action_mailer/vendor/tmail'

@@ -1,68 +1,41 @@
 module ActiveRecord
-
-  # = Active Record Dynamic Finder Match
-  #
-  # Refer to ActiveRecord::Base documentation for Dynamic attribute-based finders for detailed info
-  #
   class DynamicFinderMatch
     def self.match(method)
-      finder       = :first
-      bang         = false
-      instantiator = nil
-
-      case method.to_s
-      when /^find_(all_|last_)?by_([_a-zA-Z]\w*)$/
-        finder = :last if $1 == 'last_'
-        finder = :all if $1 == 'all_'
-        names = $2
-      when /^find_by_([_a-zA-Z]\w*)\!$/
-        bang = true
-        names = $1
-      when /^find_or_create_by_([_a-zA-Z]\w*)\!$/
-        bang = true
-        instantiator = :create
-        names = $1
-      when /^find_or_(initialize|create)_by_([_a-zA-Z]\w*)$/
-        instantiator = $1 == 'initialize' ? :new : :create
-        names = $2
-      else
-        return nil
-      end
-
-      new(finder, instantiator, bang, names.split('_and_'))
+      df_match = self.new(method)
+      df_match.finder ? df_match : nil
     end
 
-    def initialize(finder, instantiator, bang, attribute_names)
-      @finder          = finder
-      @instantiator    = instantiator
-      @bang            = bang
-      @attribute_names = attribute_names
+    def initialize(method)
+      @finder = :first
+      case method.to_s
+      when /^find_(all_by|last_by|by)_([_a-zA-Z]\w*)$/
+        @finder = :last if $1 == 'last_by'
+        @finder = :all if $1 == 'all_by'
+        names = $2
+      when /^find_by_([_a-zA-Z]\w*)\!$/
+        @bang = true
+        names = $1
+      when /^find_or_(initialize|create)_by_([_a-zA-Z]\w*)$/
+        @instantiator = $1 == 'initialize' ? :new : :create
+        names = $2
+      else
+        @finder = nil
+      end
+      @attribute_names = names && names.split('_and_')
     end
 
     attr_reader :finder, :attribute_names, :instantiator
 
     def finder?
-      @finder && !@instantiator
+      !@finder.nil? && @instantiator.nil?
     end
 
     def instantiator?
-      @finder == :first && @instantiator
-    end
-
-    def creator?
-      @finder == :first && @instantiator == :create
+      @finder == :first && !@instantiator.nil?
     end
 
     def bang?
       @bang
-    end
-
-    def save_record?
-      @instantiator == :create
-    end
-
-    def save_method
-      bang? ? :save! : :save
     end
   end
 end

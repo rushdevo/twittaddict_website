@@ -1,5 +1,3 @@
-require 'active_support/core_ext/hash/conversions'
-
 module ActiveResource
   module Formats
     module XmlFormat
@@ -18,8 +16,19 @@ module ActiveResource
       end
 
       def decode(xml)
-        Formats.remove_root(Hash.from_xml(xml))
+        from_xml_data(Hash.from_xml(xml))
       end
+
+      private
+        # Manipulate from_xml Hash, because xml_simple is not exactly what we
+        # want for Active Resource.
+        def from_xml_data(data)
+          if data.is_a?(Hash) && data.keys.size == 1
+            data.values.first
+          else
+            data
+          end
+        end
     end
   end
 end

@@ -5,80 +5,12 @@ module ActiveRecord
       def initialize (config, adapter_method)
         @config, @adapter_method = config, adapter_method
       end
-
-      ##
-      # Builds a ConnectionSpecification from user input
-      class Resolver # :nodoc:
-        attr_reader :config, :klass, :configurations
-
-        def initialize(config, configurations)
-          @config         = config
-          @configurations = configurations
-        end
-
-        def spec
-          case config
-          when nil
-            raise AdapterNotSpecified unless defined?(Rails.env)
-            resolve_string_connection Rails.env
-          when Symbol, String
-            resolve_string_connection config.to_s
-          when Hash
-            resolve_hash_connection config
-          end
-        end
-
-        private
-        def resolve_string_connection(spec) # :nodoc:
-          hash = configurations.fetch(spec) do |k|
-            connection_url_to_hash(k)
-          end
-
-          raise(AdapterNotSpecified, "#{spec} database is not configured") unless hash
-
-          resolve_hash_connection hash
-        end
-
-        def resolve_hash_connection(spec) # :nodoc:
-          spec = spec.symbolize_keys
-
-          raise(AdapterNotSpecified, "database configuration does not specify adapter") unless spec.key?(:adapter)
-
-          begin
-            require "active_record/connection_adapters/#{spec[:adapter]}_adapter"
-          rescue LoadError => e
-            raise LoadError, "Please install the #{spec[:adapter]} adapter: `gem install activerecord-#{spec[:adapter]}-adapter` (#{e.message})", e.backtrace
-          end
-
-          adapter_method = "#{spec[:adapter]}_connection"
-
-          ConnectionSpecification.new(spec, adapter_method)
-        end
-
-        def connection_url_to_hash(url) # :nodoc:
-          config = URI.parse url
-          adapter = config.scheme
-          adapter = "postgresql" if adapter == "postgres"
-          spec = { :adapter  => adapter,
-                   :username => config.user,
-                   :password => config.password,
-                   :port     => config.port,
-                   :database => config.path.sub(%r{^/},""),
-                   :host     => config.host }
-          spec.reject!{ |_,value| !value }
-          if config.query
-            options = Hash[config.query.split("&").map{ |pair| pair.split("=") }].symbolize_keys
-            spec.merge!(options)
-          end
-          spec
-        end
-      end
     end
 
     ##
     # :singleton-method:
     # The connection handler
-    class_attribute :connection_handler, :instance_writer => false
+    class_attribute :connection_handler
     self.connection_handler = ConnectionAdapters::ConnectionHandler.new
 
     # Returns the connection currently associated with the class. This can
@@ -114,27 +46,68 @@ module ActiveRecord
     #     "database"  => "path/to/dbfile"
     #   )
     #
-    # Or a URL:
-    #
-    #   ActiveRecord::Base.establish_connection(
-    #     "postgres://myuser:mypass@localhost/somedatabase"
-    #   )
-    #
     # The exceptions AdapterNotSpecified, AdapterNotFound and ArgumentError
     # may be returned on an error.
-    def self.establish_connection(spec = ENV["DATABASE_URL"])
-      resolver = ConnectionSpecification::Resolver.new spec, configurations
-      spec = resolver.spec
+    def self.establish_connection(spec = nil)
+      case spec
+        when nil
+          raise AdapterNotSpecified unless defined? RAILS_ENV
+          establish_connection(RAILS_ENV)
+        when ConnectionSpecification
+          self.connection_handler.establish_connection(name, spec)
+        when Symbol, String
+          if configuration = configurations[spec.to_s]
+            establish_connection(configuration)
+          else
+            raise AdapterNotSpecified, "#{spec} database is not configured"
+          end
+        else
+          spec = spec.symbolize_keys
+          unless spec.key?(:adapter) then raise AdapterNotSpecified, "database configuration does not specify adapter" end
 
-      unless respond_to?(spec.adapter_method)
-        raise AdapterNotFound, "database configuration specifies nonexistent #{spec.config[:adapter]} adapter"
+          begin
+            require 'rubygems'
+            gem "activerecord-#{spec[:adapter]}-adapter"
+            require "active_record/connection_adapters/#{spec[:adapter]}_adapter"
+          rescue LoadError
+            begin
+              require "active_record/connection_adapters/#{spec[:adapter]}_adapter"
+            rescue LoadError
+              raise "Please install the #{spec[:adapter]} adapter: `gem install activerecord-#{spec[:adapter]}-adapter` (#{$!})"
+            end
+          end
+
+          adapter_method = "#{spec[:adapter]}_connection"
+          if !respond_to?(adapter_method)
+            raise AdapterNotFound, "database configuration specifies nonexistent #{spec[:adapter]} adapter"
+          end
+
+          remove_connection
+          establish_connection(ConnectionSpecification.new(spec, adapter_method))
       end
-
-      remove_connection
-      connection_handler.establish_connection name, spec
     end
 
     class << self
+      # Deprecated and no longer has any effect.
+      def allow_concurrency
+        ActiveSupport::Deprecation.warn("ActiveRecord::Base.allow_concurrency has been deprecated and no longer has any effect. Please remove all references to allow_concurrency.")
+      end
+
+      # Deprecated and no longer has any effect.
+      def allow_concurrency=(flag)
+        ActiveSupport::Deprecation.warn("ActiveRecord::Base.allow_concurrency= has been deprecated and no longer has any effect. Please remove all references to allow_concurrency=.")
+      end
+
+      # Deprecated and no longer has any effect.
+      def verification_timeout
+        ActiveSupport::Deprecation.warn("ActiveRecord::Base.verification_timeout has been deprecated and no longer has any effect. Please remove all references to verification_timeout.")
+      end
+
+      # Deprecated and no longer has any effect.
+      def verification_timeout=(flag)
+        ActiveSupport::Deprecation.warn("ActiveRecord::Base.verification_timeout= has been deprecated and no longer has any effect. Please remove all references to verification_timeout=.")
+      end
+
       # Returns the connection currently associated with the class. This can
       # also be used to "borrow" the connection to do database work unrelated
       # to any of the specific Active Records.
@@ -142,33 +115,15 @@ module ActiveRecord
         retrieve_connection
       end
 
-      def connection_id
-        Thread.current['ActiveRecord::Base.connection_id']
-      end
-
-      def connection_id=(connection_id)
-        Thread.current['ActiveRecord::Base.connection_id'] = connection_id
-      end
-
-      # Returns the configuration of the associated connection as a hash:
-      #
-      #  ActiveRecord::Base.connection_config
-      #  # => {:pool=>5, :timeout=>5000, :database=>"db/development.sqlite3", :adapter=>"sqlite3"}
-      #
-      # Please use only for reading.
-      def connection_config
-        connection_pool.spec.config
-      end
-
       def connection_pool
-        connection_handler.retrieve_connection_pool(self) or raise ConnectionNotEstablished
+        connection_handler.retrieve_connection_pool(self)
       end
 
       def retrieve_connection
         connection_handler.retrieve_connection(self)
       end
 
-      # Returns true if Active Record is connected.
+      # Returns true if +ActiveRecord+ is connected.
       def connected?
         connection_handler.connected?(self)
       end
@@ -177,11 +132,7 @@ module ActiveRecord
         connection_handler.remove_connection(klass)
       end
 
-      def clear_active_connections!
-        connection_handler.clear_active_connections!
-      end
-
-      delegate :clear_reloadable_connections!,
+      delegate :clear_active_connections!, :clear_reloadable_connections!,
         :clear_all_connections!,:verify_active_connections!, :to => :connection_handler
     end
   end

@@ -9,7 +9,7 @@ module Enumerable
   #
   # Example:
   #
-  #   latest_transcripts.group_by(&:day).each do |day, transcripts|
+  #   latest_transcripts.group_by(&:day).each do |day, transcripts| 
   #     p "#{day} -> #{transcripts.map(&:class).join(', ')}"
   #   end
   #   "2006-03-01 -> Transcript"
@@ -20,7 +20,6 @@ module Enumerable
   #   "2006-02-24 -> Transcript, Transcript"
   #   "2006-02-23 -> Transcript"
   def group_by
-    return to_enum :group_by unless block_given?
     assoc = ActiveSupport::OrderedHash.new
 
     each do |element|
@@ -43,7 +42,7 @@ module Enumerable
   #
   # The latter is a shortcut for:
   #
-  #  payments.inject(0) { |sum, p| sum + p.price }
+  #  payments.inject { |sum, p| sum + p.price }
   #
   # It can also calculate the sum without the use of a block.
   #
@@ -59,7 +58,7 @@ module Enumerable
     if block_given?
       map(&block).sum(identity)
     else
-      inject(:+) || identity
+      inject { |sum, element| sum + element } || identity
     end
   end
 
@@ -67,8 +66,7 @@ module Enumerable
   # +memo+ to the block. Handy for building up hashes or
   # reducing collections down to one object. Examples:
   #
-  #   %w(foo bar).each_with_object({}) { |str, hsh| hsh[str] = str.upcase }
-  #   # => {'foo' => 'FOO', 'bar' => 'BAR'}
+  #   %w(foo bar).each_with_object({}) { |str, hsh| hsh[str] = str.upcase } #=> {'foo' => 'FOO', 'bar' => 'BAR'}
   #
   # *Note* that you can't use immutable objects like numbers, true or false as
   # the memo. You would think the following returns 120, but since the memo is
@@ -76,12 +74,12 @@ module Enumerable
   #
   #   (1..5).each_with_object(1) { |value, memo| memo *= value } # => 1
   #
-  def each_with_object(memo)
-    return to_enum :each_with_object, memo unless block_given?
-    each do |element|
-      yield element, memo
+  def each_with_object(memo, &block)
+    memo.tap do |m|
+      each do |element|
+        block.call(element, m)
+      end
     end
-    memo
   end unless [].respond_to?(:each_with_object)
 
   # Convert an enumerable to a hash. Examples:
@@ -90,38 +88,33 @@ module Enumerable
   #     => { "nextangle" => <Person ...>, "chade-" => <Person ...>, ...}
   #   people.index_by { |person| "#{person.first_name} #{person.last_name}" }
   #     => { "Chade- Fowlersburg-e" => <Person ...>, "David Heinemeier Hansson" => <Person ...>, ...}
-  #
+  # 
   def index_by
-    return to_enum :index_by unless block_given?
-    Hash[map { |elem| [yield(elem), elem] }]
-  end
-
-  # Returns true if the enumerable has more than 1 element. Functionally equivalent to enum.to_a.size > 1.
-  # Can be called with a block too, much like any?, so <tt>people.many? { |p| p.age > 26 }</tt> returns true if more than one person is over 26.
-  def many?
-    cnt = 0
-    if block_given?
-      any? do |element|
-        cnt += 1 if yield element
-        cnt > 1
-      end
-    else
-      any?{ (cnt += 1) > 1 }
+    inject({}) do |accum, elem|
+      accum[yield(elem)] = elem
+      accum
     end
   end
+  
+  # Returns true if the collection has more than 1 element. Functionally equivalent to collection.size > 1.
+  # Works with a block too ala any?, so people.many? { |p| p.age > 26 } # => returns true if more than 1 person is over 26.
+  def many?(&block)
+    size = block_given? ? select(&block).size : self.size
+    size > 1
+  end
 
-  # The negative of the <tt>Enumerable#include?</tt>. Returns true if the collection does not include the object.
+  # Returns true if none of the elements match the given block.
+  #
+  #   success = responses.none? {|r| r.status / 100 == 5 }
+  #
+  # This is a builtin method in Ruby 1.8.7 and later.
+  def none?(&block)
+    !any?(&block)
+  end unless [].respond_to?(:none?)
+
+  
+  # The negative of the Enumerable#include?. Returns true if the collection does not include the object.
   def exclude?(object)
     !include?(object)
-  end
-end
-
-class Range #:nodoc:
-  # Optimize range sum to use arithmetic progression if a block is not given and
-  # we have a range of numeric values.
-  def sum(identity = 0)
-    return super if block_given? || !(first.instance_of?(Integer) && last.instance_of?(Integer))
-    actual_last = exclude_end? ? (last - 1) : last
-    (actual_last - first + 1) * (actual_last + first) / 2
   end
 end

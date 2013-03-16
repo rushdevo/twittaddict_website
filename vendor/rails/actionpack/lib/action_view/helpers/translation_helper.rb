@@ -1,87 +1,66 @@
 require 'action_view/helpers/tag_helper'
-require 'i18n/exceptions'
-
-module I18n
-  class ExceptionHandler
-    include Module.new {
-      def call(exception, locale, key, options)
-        exception.is_a?(MissingTranslation) && options[:rescue_format] == :html ? super.html_safe : super
-      end
-    }
-  end
-end
 
 module ActionView
-  # = Action View Translation Helpers
   module Helpers
     module TranslationHelper
-      # Delegates to <tt>I18n#translate</tt> but also performs three additional functions.
+      # Delegates to I18n#translate but also performs two additional functions. First, it'll catch MissingTranslationData exceptions
+      # and turn them into inline spans that contains the missing key, such that you can see in a view what is missing where.
       #
-      # First, it'll pass the <tt>:rescue_format => :html</tt> option to I18n so that any
-      # thrown +MissingTranslation+ messages will be turned into inline spans that
-      #
-      #   * have a "translation-missing" class set,
-      #   * contain the missing key as a title attribute and
-      #   * a titleized version of the last key segment as a text.
-      #
-      # E.g. the value returned for a missing translation key :"blog.post.title" will be
-      # <span class="translation_missing" title="translation missing: en.blog.post.title">Title</span>.
-      # This way your views will display rather reasonable strings but it will still
-      # be easy to spot missing translations.
-      #
-      # Second, it'll scope the key by the current partial if the key starts
-      # with a period. So if you call <tt>translate(".foo")</tt> from the
-      # <tt>people/index.html.erb</tt> template, you'll actually be calling
-      # <tt>I18n.translate("people.index.foo")</tt>. This makes it less repetitive
-      # to translate many keys within the same partials and gives you a simple framework
-      # for scoping them consistently. If you don't prepend the key with a period,
-      # nothing is converted.
-      #
-      # Third, it'll mark the translation as safe HTML if the key has the suffix
-      # "_html" or the last element of the key is the word "html". For example,
-      # calling translate("footer_html") or translate("footer.html") will return
-      # a safe HTML string that won't be escaped by other HTML helper methods. This
-      # naming convention helps to identify translations that include HTML tags so that
-      # you know what kind of output to expect when you call translate in a template.
-      def translate(key, options = {})
-        options.merge!(:rescue_format => :html) unless options.key?(:rescue_format)
-        if html_safe_translation_key?(key)
-          html_safe_options = options.dup
-          options.except(*I18n::RESERVED_KEYS).each do |name, value|
-            unless name == :count && value.is_a?(Numeric)
-              html_safe_options[name] = ERB::Util.html_escape(value.to_s)
-            end
-          end
-          translation = I18n.translate(scope_key_by_partial(key), html_safe_options)
-
-          translation.respond_to?(:html_safe) ? translation.html_safe : translation
-        else
-          I18n.translate(scope_key_by_partial(key), options)
+      # Second, it'll scope the key by the current partial if the key starts with a period. So if you call translate(".foo") from the
+      # people/index.html.erb template, you'll actually be calling I18n.translate("people.index.foo"). This makes it less repetitive
+      # to translate many keys within the same partials and gives you a simple framework for scoping them consistently. If you don't
+      # prepend the key with a period, nothing is converted.
+      def translate(keys, options = {})
+        if multiple_keys = keys.is_a?(Array)
+          ActiveSupport::Deprecation.warn "Giving an array to translate is deprecated, please give a symbol or a string instead", caller
         end
+
+        options[:raise] = true
+        keys = scope_keys_by_partial(keys)
+
+        translations = I18n.translate(keys, options)
+        translations = [translations] if !multiple_keys && translations.size > 1
+        translations = html_safe_translation_keys(keys, translations)
+
+        if multiple_keys || translations.size > 1
+          translations
+        else
+          translations.first
+        end
+      rescue I18n::MissingTranslationData => e
+        keys = I18n.send(:normalize_translation_keys, e.locale, e.key, e.options[:scope])
+        content_tag('span', keys.join(', '), :class => 'translation_missing')
       end
       alias :t :translate
 
-      # Delegates to <tt>I18n.localize</tt> with no additional functionality.
+      # Delegates to I18n.localize with no additional functionality.
       def localize(*args)
         I18n.localize(*args)
       end
       alias :l :localize
 
+
       private
-        def scope_key_by_partial(key)
-          if key.to_s.first == "."
-            if @virtual_path
-              @virtual_path.gsub(%r{/_?}, ".") + key.to_s
+        def scope_keys_by_partial(keys)
+          Array.wrap(keys).map do |key|
+            key = key.to_s
+
+            if key.first == "."
+              template.path_without_format_and_extension.gsub(%r{/_?}, ".") + key
             else
-              raise "Cannot use t(#{key.inspect}) shortcut because path is not available"
+              key
             end
-          else
-            key
           end
         end
 
-        def html_safe_translation_key?(key)
-          key.to_s =~ /(\b|_|\.)html$/
+        def html_safe_translation_keys(keys, translations)
+          keys.zip(translations).map do |key, translation|
+            if key =~ /(\b|_|\.)html$/ && translation.respond_to?(:html_safe)
+              translation.html_safe
+            else
+              translation
+            end
+          end
         end
     end
   end

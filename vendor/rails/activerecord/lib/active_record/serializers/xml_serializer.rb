@@ -1,10 +1,5 @@
-require 'active_support/core_ext/array/wrap'
-require 'active_support/core_ext/hash/conversions'
-
 module ActiveRecord #:nodoc:
   module Serialization
-    include ActiveModel::Serializers::Xml
-
     # Builds an XML document to represent the model. Some configuration is
     # available through +options+. However more complicated cases should
     # override ActiveRecord::Base#to_xml.
@@ -72,21 +67,6 @@ module ActiveRecord #:nodoc:
     #       <id type="integer">1</id>
     #       <credit-limit type="integer">50</credit-limit>
     #     </account>
-    #   </firm>
-    #
-    # Additionally, the record being serialized will be passed to a Proc's second
-    # parameter. This allows for ad hoc additions to the resultant document that
-    # incorporate the context of the record being serialized. And by leveraging the
-    # closure created by a Proc, to_xml can be used to add elements that normally fall
-    # outside of the scope of the model -- for example, generating and appending URLs
-    # associated with models.
-    #
-    #   proc = Proc.new { |options, record| options[:builder].tag!('name-reverse', record.name.reverse) }
-    #   firm.to_xml :procs => [ proc ]
-    #
-    #   <firm>
-    #     # ... normal attributes as shown above ...
-    #     <name-reverse>slangis73</name-reverse>
     #   </firm>
     #
     # To include deeper levels of associations pass a hash like this:
@@ -163,9 +143,8 @@ module ActiveRecord #:nodoc:
     #
     #   class IHaveMyOwnXML < ActiveRecord::Base
     #     def to_xml(options = {})
-    #       require 'builder'
     #       options[:indent] ||= 2
-    #       xml = options[:builder] ||= ::Builder::XmlMarkup.new(:indent => options[:indent])
+    #       xml = options[:builder] ||= Builder::XmlMarkup.new(:indent => options[:indent])
     #       xml.instruct! unless options[:skip_instruct]
     #       xml.level_one do
     #         xml.tag!(:second_level, 'content')
@@ -173,31 +152,206 @@ module ActiveRecord #:nodoc:
     #     end
     #   end
     def to_xml(options = {}, &block)
-      XmlSerializer.new(self, options).serialize(&block)
+      serializer = XmlSerializer.new(self, options)
+      block_given? ? serializer.to_s(&block) : serializer.to_s
+    end
+
+    def from_xml(xml)
+      self.attributes = Hash.from_xml(xml).values.first
+      self
     end
   end
 
-  class XmlSerializer < ActiveModel::Serializers::Xml::Serializer #:nodoc:
-    def initialize(*args)
-      super
-      options[:except] = Array.wrap(options[:except]) | Array.wrap(@serializable.class.inheritance_column)
+  class XmlSerializer < ActiveRecord::Serialization::Serializer #:nodoc:
+    def builder
+      @builder ||= begin
+        options[:indent] ||= 2
+        builder = options[:builder] ||= Builder::XmlMarkup.new(:indent => options[:indent])
+
+        unless options[:skip_instruct]
+          builder.instruct!
+          options[:skip_instruct] = true
+        end
+
+        builder
+      end
     end
 
-    class Attribute < ActiveModel::Serializers::Xml::Serializer::Attribute #:nodoc:
-      def compute_type
-        klass = @serializable.class
-        type = if klass.serialized_attributes.key?(name)
-                 super
-               elsif klass.columns_hash.key?(name)
-                 klass.columns_hash[name].type
-               else
-                 NilClass
-               end
+    def root
+      root = (options[:root] || @record.class.model_name.singular).to_s
+      reformat_name(root)
+    end
 
-        { :text => :string,
-          :time => :datetime }[type] || type
+    def dasherize?
+      !options.has_key?(:dasherize) || options[:dasherize]
+    end
+
+    def camelize?
+      options.has_key?(:camelize) && options[:camelize]
+    end
+
+    def reformat_name(name)
+      name = name.camelize if camelize?
+      dasherize? ? name.dasherize : name
+    end
+
+    def serializable_attributes
+      serializable_attribute_names.collect { |name| Attribute.new(name, @record) }
+    end
+
+    def serializable_method_attributes
+      Array(options[:methods]).inject([]) do |method_attributes, name|
+        method_attributes << MethodAttribute.new(name.to_s, @record) if @record.respond_to?(name.to_s)
+        method_attributes
       end
-      protected :compute_type
+    end
+
+    def add_attributes
+      (serializable_attributes + serializable_method_attributes).each do |attribute|
+        add_tag(attribute)
+      end
+    end
+
+    def add_procs
+      if procs = options.delete(:procs)
+        [ *procs ].each do |proc|
+          proc.call(options)
+        end
+      end
+    end
+
+    def add_tag(attribute)
+      builder.tag!(
+        reformat_name(attribute.name),
+        attribute.value.to_s,
+        attribute.decorations(!options[:skip_types])
+      )
+    end
+
+    def add_associations(association, records, opts)
+      if records.is_a?(Enumerable)
+        tag = reformat_name(association.to_s)
+        type = options[:skip_types] ? {} : {:type => "array"}
+
+        if records.empty?
+          builder.tag!(tag, type)
+        else
+          builder.tag!(tag, type) do
+            association_name = association.to_s.singularize
+            records.each do |record|
+              if options[:skip_types]
+                record_type = {}
+              else
+                record_class = (record.class.to_s.underscore == association_name) ? nil : record.class.name
+                record_type = {:type => record_class}
+              end
+
+              record.to_xml opts.merge(:root => association_name).merge(record_type)
+            end
+          end
+        end
+      else
+        if record = @record.send(association)
+          record.to_xml(opts.merge(:root => association))
+        end
+      end
+    end
+
+    def serialize
+      args = [root]
+      if options[:namespace]
+        args << {:xmlns=>options[:namespace]}
+      end
+
+      if options[:type]
+        args << {:type=>options[:type]}
+      end
+
+      builder.tag!(*args) do
+        add_attributes
+        procs = options.delete(:procs)
+        add_includes { |association, records, opts| add_associations(association, records, opts) }
+        options[:procs] = procs
+        add_procs
+        yield builder if block_given?
+      end
+    end
+
+    class Attribute #:nodoc:
+      attr_reader :name, :value, :type
+
+      def initialize(name, record)
+        @name, @record = name, record
+
+        @type  = compute_type
+        @value = compute_value
+      end
+
+      # There is a significant speed improvement if the value
+      # does not need to be escaped, as <tt>tag!</tt> escapes all values
+      # to ensure that valid XML is generated. For known binary
+      # values, it is at least an order of magnitude faster to
+      # Base64 encode binary values and directly put them in the
+      # output XML than to pass the original value or the Base64
+      # encoded value to the <tt>tag!</tt> method. It definitely makes
+      # no sense to Base64 encode the value and then give it to
+      # <tt>tag!</tt>, since that just adds additional overhead.
+      def needs_encoding?
+        ![ :binary, :date, :datetime, :boolean, :float, :integer ].include?(type)
+      end
+
+      def decorations(include_types = true)
+        decorations = {}
+
+        if type == :binary
+          decorations[:encoding] = 'base64'
+        end
+
+        if include_types && type != :string
+          decorations[:type] = type
+        end
+
+        if value.nil?
+          decorations[:nil] = true
+        end
+
+        decorations
+      end
+
+      protected
+        def compute_type
+          type = if @record.class.serialized_attributes.has_key?(name)
+                   :yaml
+                 else
+                   @record.class.columns_hash[name].try(:type)
+                 end
+
+          case type
+            when :text
+              :string
+            when :time
+              :datetime
+            else
+              type
+          end
+        end
+
+        def compute_value
+          value = @record.send(name)
+
+          if formatter = Hash::XML_FORMATTING[type.to_s]
+            value ? formatter.call(value) : nil
+          else
+            value
+          end
+        end
+    end
+
+    class MethodAttribute < Attribute #:nodoc:
+      protected
+        def compute_type
+          Hash::XML_TYPE_NAMES[@record.send(name).class.name] || :string
+        end
     end
   end
 end

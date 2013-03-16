@@ -1,6 +1,3 @@
-require 'active_support/core_ext/object/blank'
-require 'active_support/core_ext/object/try'
-
 # The TimeZone class serves as a wrapper around TZInfo::Timezone instances. It allows us to do the following:
 #
 # * Limit the set of zones provided by TZInfo to a meaningful subset of 142 zones.
@@ -8,10 +5,10 @@ require 'active_support/core_ext/object/try'
 # * Lazily load TZInfo::Timezone instances only when they're needed.
 # * Create ActiveSupport::TimeWithZone instances via TimeZone's +local+, +parse+, +at+ and +now+ methods.
 #
-# If you set <tt>config.time_zone</tt> in the Rails Application, you can access this TimeZone object via <tt>Time.zone</tt>:
+# If you set <tt>config.time_zone</tt> in the Rails Initializer, you can access this TimeZone object via <tt>Time.zone</tt>:
 #
-#   # application.rb:
-#   class Application < Rails::Application
+#   # environment.rb:
+#   Rails::Initializer.run do |config|
 #     config.time_zone = "Eastern Time (US & Canada)"
 #   end
 #
@@ -24,166 +21,153 @@ require 'active_support/core_ext/object/try'
 # (if a recent version of the gem is installed locally, this will be used instead of the bundled version.)
 module ActiveSupport
   class TimeZone
-    # Keys are Rails TimeZone names, values are TZInfo identifiers
-    MAPPING = {
-      "International Date Line West" => "Pacific/Midway",
-      "Midway Island"                => "Pacific/Midway",
-      "Samoa"                        => "Pacific/Pago_Pago",
-      "Hawaii"                       => "Pacific/Honolulu",
-      "Alaska"                       => "America/Juneau",
-      "Pacific Time (US & Canada)"   => "America/Los_Angeles",
-      "Tijuana"                      => "America/Tijuana",
-      "Mountain Time (US & Canada)"  => "America/Denver",
-      "Arizona"                      => "America/Phoenix",
-      "Chihuahua"                    => "America/Chihuahua",
-      "Mazatlan"                     => "America/Mazatlan",
-      "Central Time (US & Canada)"   => "America/Chicago",
-      "Saskatchewan"                 => "America/Regina",
-      "Guadalajara"                  => "America/Mexico_City",
-      "Mexico City"                  => "America/Mexico_City",
-      "Monterrey"                    => "America/Monterrey",
-      "Central America"              => "America/Guatemala",
-      "Eastern Time (US & Canada)"   => "America/New_York",
-      "Indiana (East)"               => "America/Indiana/Indianapolis",
-      "Bogota"                       => "America/Bogota",
-      "Lima"                         => "America/Lima",
-      "Quito"                        => "America/Lima",
-      "Atlantic Time (Canada)"       => "America/Halifax",
-      "Caracas"                      => "America/Caracas",
-      "La Paz"                       => "America/La_Paz",
-      "Santiago"                     => "America/Santiago",
-      "Newfoundland"                 => "America/St_Johns",
-      "Brasilia"                     => "America/Sao_Paulo",
-      "Buenos Aires"                 => "America/Argentina/Buenos_Aires",
-      "Georgetown"                   => "America/Guyana",
-      "Greenland"                    => "America/Godthab",
-      "Mid-Atlantic"                 => "Atlantic/South_Georgia",
-      "Azores"                       => "Atlantic/Azores",
-      "Cape Verde Is."               => "Atlantic/Cape_Verde",
-      "Dublin"                       => "Europe/Dublin",
-      "Edinburgh"                    => "Europe/London",
-      "Lisbon"                       => "Europe/Lisbon",
-      "London"                       => "Europe/London",
-      "Casablanca"                   => "Africa/Casablanca",
-      "Monrovia"                     => "Africa/Monrovia",
-      "UTC"                          => "Etc/UTC",
-      "Belgrade"                     => "Europe/Belgrade",
-      "Bratislava"                   => "Europe/Bratislava",
-      "Budapest"                     => "Europe/Budapest",
-      "Ljubljana"                    => "Europe/Ljubljana",
-      "Prague"                       => "Europe/Prague",
-      "Sarajevo"                     => "Europe/Sarajevo",
-      "Skopje"                       => "Europe/Skopje",
-      "Warsaw"                       => "Europe/Warsaw",
-      "Zagreb"                       => "Europe/Zagreb",
-      "Brussels"                     => "Europe/Brussels",
-      "Copenhagen"                   => "Europe/Copenhagen",
-      "Madrid"                       => "Europe/Madrid",
-      "Paris"                        => "Europe/Paris",
-      "Amsterdam"                    => "Europe/Amsterdam",
-      "Berlin"                       => "Europe/Berlin",
-      "Bern"                         => "Europe/Berlin",
-      "Rome"                         => "Europe/Rome",
-      "Stockholm"                    => "Europe/Stockholm",
-      "Vienna"                       => "Europe/Vienna",
-      "West Central Africa"          => "Africa/Algiers",
-      "Bucharest"                    => "Europe/Bucharest",
-      "Cairo"                        => "Africa/Cairo",
-      "Helsinki"                     => "Europe/Helsinki",
-      "Kyiv"                         => "Europe/Kiev",
-      "Riga"                         => "Europe/Riga",
-      "Sofia"                        => "Europe/Sofia",
-      "Tallinn"                      => "Europe/Tallinn",
-      "Vilnius"                      => "Europe/Vilnius",
-      "Athens"                       => "Europe/Athens",
-      "Istanbul"                     => "Europe/Istanbul",
-      "Minsk"                        => "Europe/Minsk",
-      "Jerusalem"                    => "Asia/Jerusalem",
-      "Harare"                       => "Africa/Harare",
-      "Pretoria"                     => "Africa/Johannesburg",
-      "Moscow"                       => "Europe/Moscow",
-      "St. Petersburg"               => "Europe/Moscow",
-      "Volgograd"                    => "Europe/Moscow",
-      "Kuwait"                       => "Asia/Kuwait",
-      "Riyadh"                       => "Asia/Riyadh",
-      "Nairobi"                      => "Africa/Nairobi",
-      "Baghdad"                      => "Asia/Baghdad",
-      "Tehran"                       => "Asia/Tehran",
-      "Abu Dhabi"                    => "Asia/Muscat",
-      "Muscat"                       => "Asia/Muscat",
-      "Baku"                         => "Asia/Baku",
-      "Tbilisi"                      => "Asia/Tbilisi",
-      "Yerevan"                      => "Asia/Yerevan",
-      "Kabul"                        => "Asia/Kabul",
-      "Ekaterinburg"                 => "Asia/Yekaterinburg",
-      "Islamabad"                    => "Asia/Karachi",
-      "Karachi"                      => "Asia/Karachi",
-      "Tashkent"                     => "Asia/Tashkent",
-      "Chennai"                      => "Asia/Kolkata",
-      "Kolkata"                      => "Asia/Kolkata",
-      "Mumbai"                       => "Asia/Kolkata",
-      "New Delhi"                    => "Asia/Kolkata",
-      "Kathmandu"                    => "Asia/Kathmandu",
-      "Astana"                       => "Asia/Dhaka",
-      "Dhaka"                        => "Asia/Dhaka",
-      "Sri Jayawardenepura"          => "Asia/Colombo",
-      "Almaty"                       => "Asia/Almaty",
-      "Novosibirsk"                  => "Asia/Novosibirsk",
-      "Rangoon"                      => "Asia/Rangoon",
-      "Bangkok"                      => "Asia/Bangkok",
-      "Hanoi"                        => "Asia/Bangkok",
-      "Jakarta"                      => "Asia/Jakarta",
-      "Krasnoyarsk"                  => "Asia/Krasnoyarsk",
-      "Beijing"                      => "Asia/Shanghai",
-      "Chongqing"                    => "Asia/Chongqing",
-      "Hong Kong"                    => "Asia/Hong_Kong",
-      "Urumqi"                       => "Asia/Urumqi",
-      "Kuala Lumpur"                 => "Asia/Kuala_Lumpur",
-      "Singapore"                    => "Asia/Singapore",
-      "Taipei"                       => "Asia/Taipei",
-      "Perth"                        => "Australia/Perth",
-      "Irkutsk"                      => "Asia/Irkutsk",
-      "Ulaan Bataar"                 => "Asia/Ulaanbaatar",
-      "Seoul"                        => "Asia/Seoul",
-      "Osaka"                        => "Asia/Tokyo",
-      "Sapporo"                      => "Asia/Tokyo",
-      "Tokyo"                        => "Asia/Tokyo",
-      "Yakutsk"                      => "Asia/Yakutsk",
-      "Darwin"                       => "Australia/Darwin",
-      "Adelaide"                     => "Australia/Adelaide",
-      "Canberra"                     => "Australia/Melbourne",
-      "Melbourne"                    => "Australia/Melbourne",
-      "Sydney"                       => "Australia/Sydney",
-      "Brisbane"                     => "Australia/Brisbane",
-      "Hobart"                       => "Australia/Hobart",
-      "Vladivostok"                  => "Asia/Vladivostok",
-      "Guam"                         => "Pacific/Guam",
-      "Port Moresby"                 => "Pacific/Port_Moresby",
-      "Magadan"                      => "Asia/Magadan",
-      "Solomon Is."                  => "Asia/Magadan",
-      "New Caledonia"                => "Pacific/Noumea",
-      "Fiji"                         => "Pacific/Fiji",
-      "Kamchatka"                    => "Asia/Kamchatka",
-      "Marshall Is."                 => "Pacific/Majuro",
-      "Auckland"                     => "Pacific/Auckland",
-      "Wellington"                   => "Pacific/Auckland",
-      "Nuku'alofa"                   => "Pacific/Tongatapu"
-    }.each { |name, zone| name.freeze; zone.freeze }
-    MAPPING.freeze
-
-    UTC_OFFSET_WITH_COLON = '%s%02d:%02d'
-    UTC_OFFSET_WITHOUT_COLON = UTC_OFFSET_WITH_COLON.sub(':', '')
-
-    # Assumes self represents an offset from UTC in seconds (as returned from Time#utc_offset)
-    # and turns this into an +HH:MM formatted string. Example:
-    #
-    #   TimeZone.seconds_to_utc_offset(-21_600) # => "-06:00"
-    def self.seconds_to_utc_offset(seconds, colon = true)
-      format = colon ? UTC_OFFSET_WITH_COLON : UTC_OFFSET_WITHOUT_COLON
-      sign = (seconds < 0 ? '-' : '+')
-      hours = seconds.abs / 3600
-      minutes = (seconds.abs % 3600) / 60
-      format % [sign, hours, minutes]
+    unless const_defined?(:MAPPING)
+      # Keys are Rails TimeZone names, values are TZInfo identifiers
+      MAPPING = {
+        "International Date Line West" => "Pacific/Midway",
+        "Midway Island"                => "Pacific/Midway",
+        "Samoa"                        => "Pacific/Pago_Pago",
+        "Hawaii"                       => "Pacific/Honolulu",
+        "Alaska"                       => "America/Juneau",
+        "Pacific Time (US & Canada)"   => "America/Los_Angeles",
+        "Tijuana"                      => "America/Tijuana",
+        "Mountain Time (US & Canada)"  => "America/Denver",
+        "Arizona"                      => "America/Phoenix",
+        "Chihuahua"                    => "America/Chihuahua",
+        "Mazatlan"                     => "America/Mazatlan",
+        "Central Time (US & Canada)"   => "America/Chicago",
+        "Saskatchewan"                 => "America/Regina",
+        "Guadalajara"                  => "America/Mexico_City",
+        "Mexico City"                  => "America/Mexico_City",
+        "Monterrey"                    => "America/Monterrey",
+        "Central America"              => "America/Guatemala",
+        "Eastern Time (US & Canada)"   => "America/New_York",
+        "Indiana (East)"               => "America/Indiana/Indianapolis",
+        "Bogota"                       => "America/Bogota",
+        "Lima"                         => "America/Lima",
+        "Quito"                        => "America/Lima",
+        "Atlantic Time (Canada)"       => "America/Halifax",
+        "Caracas"                      => "America/Caracas",
+        "La Paz"                       => "America/La_Paz",
+        "Santiago"                     => "America/Santiago",
+        "Newfoundland"                 => "America/St_Johns",
+        "Brasilia"                     => "America/Sao_Paulo",
+        "Buenos Aires"                 => "America/Argentina/Buenos_Aires",
+        "Georgetown"                   => "America/Argentina/San_Juan",
+        "Greenland"                    => "America/Godthab",
+        "Mid-Atlantic"                 => "Atlantic/South_Georgia",
+        "Azores"                       => "Atlantic/Azores",
+        "Cape Verde Is."               => "Atlantic/Cape_Verde",
+        "Dublin"                       => "Europe/Dublin",
+        "Edinburgh"                    => "Europe/Dublin",
+        "Lisbon"                       => "Europe/Lisbon",
+        "London"                       => "Europe/London",
+        "Casablanca"                   => "Africa/Casablanca",
+        "Monrovia"                     => "Africa/Monrovia",
+        "UTC"                          => "Etc/UTC",
+        "Belgrade"                     => "Europe/Belgrade",
+        "Bratislava"                   => "Europe/Bratislava",
+        "Budapest"                     => "Europe/Budapest",
+        "Ljubljana"                    => "Europe/Ljubljana",
+        "Prague"                       => "Europe/Prague",
+        "Sarajevo"                     => "Europe/Sarajevo",
+        "Skopje"                       => "Europe/Skopje",
+        "Warsaw"                       => "Europe/Warsaw",
+        "Zagreb"                       => "Europe/Zagreb",
+        "Brussels"                     => "Europe/Brussels",
+        "Copenhagen"                   => "Europe/Copenhagen",
+        "Madrid"                       => "Europe/Madrid",
+        "Paris"                        => "Europe/Paris",
+        "Amsterdam"                    => "Europe/Amsterdam",
+        "Berlin"                       => "Europe/Berlin",
+        "Bern"                         => "Europe/Berlin",
+        "Rome"                         => "Europe/Rome",
+        "Stockholm"                    => "Europe/Stockholm",
+        "Vienna"                       => "Europe/Vienna",
+        "West Central Africa"          => "Africa/Algiers",
+        "Bucharest"                    => "Europe/Bucharest",
+        "Cairo"                        => "Africa/Cairo",
+        "Helsinki"                     => "Europe/Helsinki",
+        "Kyev"                         => "Europe/Kiev",
+        "Riga"                         => "Europe/Riga",
+        "Sofia"                        => "Europe/Sofia",
+        "Tallinn"                      => "Europe/Tallinn",
+        "Vilnius"                      => "Europe/Vilnius",
+        "Athens"                       => "Europe/Athens",
+        "Istanbul"                     => "Europe/Istanbul",
+        "Minsk"                        => "Europe/Minsk",
+        "Jerusalem"                    => "Asia/Jerusalem",
+        "Harare"                       => "Africa/Harare",
+        "Pretoria"                     => "Africa/Johannesburg",
+        "Moscow"                       => "Europe/Moscow",
+        "St. Petersburg"               => "Europe/Moscow",
+        "Volgograd"                    => "Europe/Moscow",
+        "Kuwait"                       => "Asia/Kuwait",
+        "Riyadh"                       => "Asia/Riyadh",
+        "Nairobi"                      => "Africa/Nairobi",
+        "Baghdad"                      => "Asia/Baghdad",
+        "Tehran"                       => "Asia/Tehran",
+        "Abu Dhabi"                    => "Asia/Muscat",
+        "Muscat"                       => "Asia/Muscat",
+        "Baku"                         => "Asia/Baku",
+        "Tbilisi"                      => "Asia/Tbilisi",
+        "Yerevan"                      => "Asia/Yerevan",
+        "Kabul"                        => "Asia/Kabul",
+        "Ekaterinburg"                 => "Asia/Yekaterinburg",
+        "Islamabad"                    => "Asia/Karachi",
+        "Karachi"                      => "Asia/Karachi",
+        "Tashkent"                     => "Asia/Tashkent",
+        "Chennai"                      => "Asia/Kolkata",
+        "Kolkata"                      => "Asia/Kolkata",
+        "Mumbai"                       => "Asia/Kolkata",
+        "New Delhi"                    => "Asia/Kolkata",
+        "Kathmandu"                    => "Asia/Katmandu",
+        "Astana"                       => "Asia/Dhaka",
+        "Dhaka"                        => "Asia/Dhaka",
+        "Sri Jayawardenepura"          => "Asia/Colombo",
+        "Almaty"                       => "Asia/Almaty",
+        "Novosibirsk"                  => "Asia/Novosibirsk",
+        "Rangoon"                      => "Asia/Rangoon",
+        "Bangkok"                      => "Asia/Bangkok",
+        "Hanoi"                        => "Asia/Bangkok",
+        "Jakarta"                      => "Asia/Jakarta",
+        "Krasnoyarsk"                  => "Asia/Krasnoyarsk",
+        "Beijing"                      => "Asia/Shanghai",
+        "Chongqing"                    => "Asia/Chongqing",
+        "Hong Kong"                    => "Asia/Hong_Kong",
+        "Urumqi"                       => "Asia/Urumqi",
+        "Kuala Lumpur"                 => "Asia/Kuala_Lumpur",
+        "Singapore"                    => "Asia/Singapore",
+        "Taipei"                       => "Asia/Taipei",
+        "Perth"                        => "Australia/Perth",
+        "Irkutsk"                      => "Asia/Irkutsk",
+        "Ulaan Bataar"                 => "Asia/Ulaanbaatar",
+        "Seoul"                        => "Asia/Seoul",
+        "Osaka"                        => "Asia/Tokyo",
+        "Sapporo"                      => "Asia/Tokyo",
+        "Tokyo"                        => "Asia/Tokyo",
+        "Yakutsk"                      => "Asia/Yakutsk",
+        "Darwin"                       => "Australia/Darwin",
+        "Adelaide"                     => "Australia/Adelaide",
+        "Canberra"                     => "Australia/Melbourne",
+        "Melbourne"                    => "Australia/Melbourne",
+        "Sydney"                       => "Australia/Sydney",
+        "Brisbane"                     => "Australia/Brisbane",
+        "Hobart"                       => "Australia/Hobart",
+        "Vladivostok"                  => "Asia/Vladivostok",
+        "Guam"                         => "Pacific/Guam",
+        "Port Moresby"                 => "Pacific/Port_Moresby",
+        "Magadan"                      => "Asia/Magadan",
+        "Solomon Is."                  => "Asia/Magadan",
+        "New Caledonia"                => "Pacific/Noumea",
+        "Fiji"                         => "Pacific/Fiji",
+        "Kamchatka"                    => "Asia/Kamchatka",
+        "Marshall Is."                 => "Pacific/Majuro",
+        "Auckland"                     => "Pacific/Auckland",
+        "Wellington"                   => "Pacific/Auckland",
+        "Nuku'alofa"                   => "Pacific/Tongatapu"
+      }.each { |name, zone| name.freeze; zone.freeze }
+      MAPPING.freeze
     end
 
     include Comparable
@@ -195,8 +179,6 @@ module ActiveSupport
     # (GMT). Seconds were chosen as the offset unit because that is the unit that
     # Ruby uses to represent time zone offsets (see Time#utc_offset).
     def initialize(name, utc_offset = nil, tzinfo = nil)
-      self.class.send(:require_tzinfo)
-
       @name = name
       @utc_offset = utc_offset
       @tzinfo = tzinfo || TimeZone.find_tzinfo(name)
@@ -207,18 +189,18 @@ module ActiveSupport
       if @utc_offset
         @utc_offset
       else
-        @current_period ||= tzinfo.try(:current_period)
-        @current_period.try(:utc_offset)
+        @current_period ||= tzinfo.current_period
+        @current_period.utc_offset
       end
     end
 
     # Returns the offset of this time zone as a formatted string, of the
     # format "+HH:MM".
     def formatted_offset(colon=true, alternate_utc_string = nil)
-      utc_offset == 0 && alternate_utc_string || self.class.seconds_to_utc_offset(utc_offset, colon)
+      utc_offset == 0 && alternate_utc_string || utc_offset.to_utc_offset_s(colon)
     end
 
-    # Compare this time zone to the parameter. The two are compared first on
+    # Compare this time zone to the parameter. The two are comapred first on
     # their offsets, and then by name.
     def <=>(zone)
       result = (utc_offset <=> zone.utc_offset)
@@ -311,8 +293,12 @@ module ActiveSupport
       tzinfo.period_for_local(time, dst)
     end
 
+    # TODO: Preload instead of lazy load for thread safety
     def self.find_tzinfo(name)
-      TZInfo::TimezoneProxy.new(MAPPING[name] || name)
+      require 'tzinfo' unless defined?(TZInfo)
+      ::TZInfo::Timezone.get(MAPPING[name] || name)
+    rescue TZInfo::InvalidTimezoneIdentifier
+      nil
     end
 
     class << self
@@ -333,12 +319,64 @@ module ActiveSupport
       end
 
       def zones_map
-        @zones_map ||= begin
-          new_zones_names = MAPPING.keys - lazy_zones_map.keys
-          new_zones       = Hash[new_zones_names.map { |place| [place, create(place)] }]
-
-          lazy_zones_map.merge(new_zones)
+        unless defined?(@zones_map)
+          @zones_map = {}
+          [[-39_600, "International Date Line West", "Midway Island", "Samoa" ],
+           [-36_000, "Hawaii" ],
+           [-32_400, "Alaska" ],
+           [-28_800, "Pacific Time (US & Canada)", "Tijuana" ],
+           [-25_200, "Mountain Time (US & Canada)", "Chihuahua", "Mazatlan",
+                     "Arizona" ],
+           [-21_600, "Central Time (US & Canada)", "Saskatchewan", "Guadalajara",
+                     "Mexico City", "Monterrey", "Central America" ],
+           [-18_000, "Eastern Time (US & Canada)", "Indiana (East)", "Bogota",
+                     "Lima", "Quito" ],
+           [-16_200, "Caracas" ],
+           [-14_400, "Atlantic Time (Canada)", "La Paz", "Santiago" ],
+           [-12_600, "Newfoundland" ],
+           [-10_800, "Brasilia", "Buenos Aires", "Georgetown", "Greenland" ],
+           [ -7_200, "Mid-Atlantic" ],
+           [ -3_600, "Azores", "Cape Verde Is." ],
+           [      0, "Dublin", "Edinburgh", "Lisbon", "London", "Casablanca",
+                     "Monrovia", "UTC" ],
+           [  3_600, "Belgrade", "Bratislava", "Budapest", "Ljubljana", "Prague",
+                     "Sarajevo", "Skopje", "Warsaw", "Zagreb", "Brussels",
+                     "Copenhagen", "Madrid", "Paris", "Amsterdam", "Berlin",
+                     "Bern", "Rome", "Stockholm", "Vienna",
+                     "West Central Africa" ],
+           [  7_200, "Bucharest", "Cairo", "Helsinki", "Kyev", "Riga", "Sofia",
+                     "Tallinn", "Vilnius", "Athens", "Istanbul", "Minsk",
+                     "Jerusalem", "Harare", "Pretoria" ],
+           [ 10_800, "Moscow", "St. Petersburg", "Volgograd", "Kuwait", "Riyadh",
+                     "Nairobi", "Baghdad" ],
+           [ 12_600, "Tehran" ],
+           [ 14_400, "Abu Dhabi", "Muscat", "Baku", "Tbilisi", "Yerevan" ],
+           [ 16_200, "Kabul" ],
+           [ 18_000, "Ekaterinburg", "Islamabad", "Karachi", "Tashkent" ],
+           [ 19_800, "Chennai", "Kolkata", "Mumbai", "New Delhi", "Sri Jayawardenepura" ],
+           [ 20_700, "Kathmandu" ],
+           [ 21_600, "Astana", "Dhaka", "Almaty",
+                     "Novosibirsk" ],
+           [ 23_400, "Rangoon" ],
+           [ 25_200, "Bangkok", "Hanoi", "Jakarta", "Krasnoyarsk" ],
+           [ 28_800, "Beijing", "Chongqing", "Hong Kong", "Urumqi",
+                     "Kuala Lumpur", "Singapore", "Taipei", "Perth", "Irkutsk",
+                     "Ulaan Bataar" ],
+           [ 32_400, "Seoul", "Osaka", "Sapporo", "Tokyo", "Yakutsk" ],
+           [ 34_200, "Darwin", "Adelaide" ],
+           [ 36_000, "Canberra", "Melbourne", "Sydney", "Brisbane", "Hobart",
+                     "Vladivostok", "Guam", "Port Moresby" ],
+           [ 39_600, "Magadan", "Solomon Is.", "New Caledonia" ],
+           [ 43_200, "Fiji", "Kamchatka", "Marshall Is.", "Auckland",
+                     "Wellington" ],
+           [ 46_800, "Nuku'alofa" ]].
+           each do |offset, *places|
+             places.each do |place|
+               @zones_map[place] = create(place, offset)
+             end
+           end
         end
+        @zones_map
       end
 
       # Locate a specific time zone object. If the argument is a string, it
@@ -349,11 +387,11 @@ module ActiveSupport
       def [](arg)
         case arg
           when String
-          begin
-            lazy_zones_map[arg] ||= lookup(arg).tap { |tz| tz.utc_offset }
-          rescue TZInfo::InvalidTimezoneIdentifier
-            nil
-          end
+            if tz = zones_map[arg]
+              tz
+            elsif tz = lookup(arg)
+              zones_map[arg] = tz
+            end
           when Numeric, ActiveSupport::Duration
             arg *= 3600 if arg.abs <= 13
             all.find { |z| z.utc_offset == arg.to_i }
@@ -367,28 +405,11 @@ module ActiveSupport
       def us_zones
         @us_zones ||= all.find_all { |z| z.name =~ /US|Arizona|Indiana|Hawaii|Alaska/ }
       end
-
-      protected
-
-        def require_tzinfo
-          require 'tzinfo' unless defined?(::TZInfo)
-        rescue LoadError
-          $stderr.puts "You don't have tzinfo installed in your application. Please add it to your Gemfile and run bundle install"
-          raise
-        end
-
+      
       private
 
         def lookup(name)
           (tzinfo = find_tzinfo(name)) && create(tzinfo.name.freeze)
-        end
-
-        def lazy_zones_map
-          require_tzinfo
-
-          @lazy_zones_map ||= Hash.new do |hash, place|
-            hash[place] = create(place) if MAPPING.has_key?(place)
-          end
         end
     end
   end

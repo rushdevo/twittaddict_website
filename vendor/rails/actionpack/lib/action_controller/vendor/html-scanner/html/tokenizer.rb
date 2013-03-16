@@ -1,7 +1,7 @@
 require 'strscan'
 
 module HTML #:nodoc:
-
+  
   # A simple HTML tokenizer. It simply breaks a stream of text into tokens, where each
   # token is a string. Each string represents either "text", or an HTML element.
   #
@@ -14,16 +14,15 @@ module HTML #:nodoc:
   #     p token
   #   end
   class Tokenizer #:nodoc:
-
+    
     # The current (byte) position in the text
     attr_reader :position
-
+    
     # The current line number
     attr_reader :line
-
+    
     # Create a new Tokenizer for the given text.
     def initialize(text)
-      text.encode! if text.encoding_aware?
       @scanner = StringScanner.new(text)
       @position = 0
       @line = 0
@@ -42,7 +41,7 @@ module HTML #:nodoc:
         update_current_line(scan_text)
       end
     end
-
+  
     private
 
       # Treat the text at the current position as a tag, and scan it. Supports
@@ -69,13 +68,13 @@ module HTML #:nodoc:
       def scan_text
         "#{@scanner.getch}#{@scanner.scan(/[^<]*/)}"
       end
-
+      
       # Counts the number of newlines in the text and updates the current line
       # accordingly.
       def update_current_line(text)
         text.scan(/\r?\n/) { @current_line += 1 }
       end
-
+      
       # Skips over quoted strings, so that less-than and greater-than characters
       # within the strings are ignored.
       def consume_quoted_regions
@@ -96,12 +95,11 @@ module HTML #:nodoc:
           while match = @scanner.scan_until(/[\\#{delim}]/)
             text << match
             break if @scanner.matched == delim
-            break if @scanner.eos?
             text << @scanner.getch # skip the escaped character
           end
         end
         text
       end
   end
-
+  
 end

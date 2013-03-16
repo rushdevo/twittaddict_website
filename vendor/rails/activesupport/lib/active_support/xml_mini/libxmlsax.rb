@@ -1,6 +1,4 @@
 require 'libxml'
-require 'active_support/core_ext/object/blank'
-require 'stringio'
 
 # = XmlMini LibXML implementation using a SAX-based parser
 module ActiveSupport
@@ -62,25 +60,15 @@ module ActiveSupport
     attr_accessor :document_class
     self.document_class = HashBuilder
 
-    def parse(data)
-      if !data.respond_to?(:read)
-        data = StringIO.new(data || '')
-      end
+    def parse(string)
+      return {} if string.blank?
+      LibXML::XML::Error.set_handler(&LibXML::XML::Error::QUIET_HANDLER)
+      parser = LibXML::XML::SaxParser.string(string)
+      document = self.document_class.new
 
-      char = data.getc
-      if char.nil?
-        {}
-      else
-        data.ungetc(char)
-
-        LibXML::XML::Error.set_handler(&LibXML::XML::Error::QUIET_HANDLER)
-        parser = LibXML::XML::SaxParser.io(data)
-        document = self.document_class.new
-
-        parser.callbacks = document
-        parser.parse
-        document.hash
-      end
+      parser.callbacks = document
+      parser.parse
+      document.hash
     end
   end
 end

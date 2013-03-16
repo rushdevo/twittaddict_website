@@ -3,14 +3,12 @@ raise "JRuby is required to use the JDOM backend for XmlMini" unless RUBY_PLATFO
 require 'jruby'
 include Java
 
-require 'active_support/core_ext/object/blank'
-
-java_import javax.xml.parsers.DocumentBuilder unless defined? DocumentBuilder
-java_import javax.xml.parsers.DocumentBuilderFactory unless defined? DocumentBuilderFactory
-java_import java.io.StringReader unless defined? StringReader
-java_import org.xml.sax.InputSource unless defined? InputSource
-java_import org.xml.sax.Attributes unless defined? Attributes
-java_import org.w3c.dom.Node unless defined? Node
+import javax.xml.parsers.DocumentBuilder unless defined? DocumentBuilder
+import javax.xml.parsers.DocumentBuilderFactory unless defined? DocumentBuilderFactory
+import java.io.StringReader unless defined? StringReader
+import org.xml.sax.InputSource unless defined? InputSource
+import org.xml.sax.Attributes unless defined? Attributes
+import org.w3c.dom.Node unless defined? Node
 
 # = XmlMini JRuby JDOM implementation
 module ActiveSupport
@@ -26,22 +24,18 @@ module ActiveSupport
     node_type_map = {}
     NODE_TYPE_NAMES.each { |type| node_type_map[Node.send(type)] = type }
 
-    # Parse an XML Document string or IO into a simple hash using Java's jdom.
-    # data::
-    #   XML Document string or IO to parse
-    def parse(data)
-      if data.respond_to?(:read)
-        data = data.read
-      end
-
-      if data.blank?
+    # Parse an XML Document string into a simple hash using Java's jdom.
+    # string::
+    #   XML Document string to parse
+    def parse(string)
+      if string.blank?
         {}
       else
         @dbf = DocumentBuilderFactory.new_instance
-        xml_string_reader = StringReader.new(data)
+        xml_string_reader = StringReader.new(string)
         xml_input_source = InputSource.new(xml_string_reader)
         doc = @dbf.new_document_builder.parse(xml_input_source)
-        merge_element!({CONTENT_KEY => ''}, doc.document_element)
+        merge_element!({}, doc.document_element)
       end
     end
 
@@ -54,12 +48,7 @@ module ActiveSupport
     # element::
     #   XML element to merge into hash
     def merge_element!(hash, element)
-      delete_empty(hash)
       merge!(hash, element.tag_name, collapse(element))
-    end
-
-    def delete_empty(hash)
-      hash.delete(CONTENT_KEY) if hash[CONTENT_KEY] == ''
     end
 
     # Actually converts an XML document element into a data structure.
@@ -85,11 +74,10 @@ module ActiveSupport
     # Merge all the texts of an element into the hash
     #
     # hash::
-    #   Hash to add the converted element to.
+    #   Hash to add the converted emement to.
     # element::
     #   XML element whose texts are to me merged into the hash
     def merge_texts!(hash, element)
-      delete_empty(hash)
       text_children = texts(element)
       if text_children.join.empty?
         hash
@@ -134,7 +122,6 @@ module ActiveSupport
       attribute_hash = {}
       attributes = element.attributes
       for i in 0...attributes.length
-         attribute_hash[CONTENT_KEY] ||= ''
          attribute_hash[attributes.item(i).name] =  attributes.item(i).value
        end
       attribute_hash
